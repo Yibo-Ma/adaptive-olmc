@@ -1,4 +1,9 @@
-# OnlineLMCompress
+# Adaptive OLMC
+
+**The goal is controllable, robust online adaptation — not a smaller compressor, but an
+online learner that *knows when to learn*: it captures gains where a stream is transferable
+and barely loses where it is not, judged for free from the realized code length (an exact
+loss shared bit-identically by encoder and decoder).**
 
 Lossless compression with large models, extended with an **online** twist: the model
 keeps learning from the data it has already seen while it compresses.
@@ -103,7 +108,7 @@ checkpoints/             Qwen2.5-0.5B, Qwen3-*, bgpt/weights-*.pth (git-ignored;
 
 ```bash
 conda env create -f environment.yml     # python 3.11 + ffmpeg + pinned pip deps (see requirements.txt)
-conda activate olmc
+conda activate aolmc
 # GPU: torch from PyPI is CUDA-enabled on Linux; to pin a CUDA build:
 #   pip install torch --index-url https://download.pytorch.org/whl/cu121
 ```

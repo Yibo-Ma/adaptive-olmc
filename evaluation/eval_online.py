@@ -227,13 +227,18 @@ def _run_mode(mode: str, args, device, cfg: OnlineLearningConfig):
         if mode == "static":
             return StaticCompressor(backend, device, batch_chunks=args.batch_chunks,
                                     shuffle_seed=args.shuffle_seed)
-        return OnlineCompressor(backend, device, cfg, shuffle_seed=args.shuffle_seed)
+        return OnlineCompressor(backend, device, cfg, shuffle_seed=args.shuffle_seed,
+                                measure_gk=args.measure_gk)
 
     comp = make_compressor()
     comp.setup()
     sync(device); t0 = time.time()
     archive = comp.compress(raw, framing)
     sync(device); comp_s = time.time() - t0
+
+    # g_k / Δ_in records (online + --measure-gk only; None otherwise). Grab before
+    # the model is freed below so gk_curve.py can plot them from --json alone.
+    gk_records = getattr(comp, "gk_records", None)
 
     comp_bytes = len(archive)
     ratio = orig_bytes / max(comp_bytes, 1)
@@ -276,7 +281,7 @@ def _run_mode(mode: str, args, device, cfg: OnlineLearningConfig):
 
     return dict(mode=mode, orig=orig_bytes, comp=comp_bytes,
                 ratio=ratio, bpb=bpb, bpsp=bpsp, comp_s=comp_s, decomp_s=decomp_s,
-                chunk_lengths=chunk_lengths, chunk_bits=chunk_bits)
+                chunk_lengths=chunk_lengths, chunk_bits=chunk_bits, gk=gk_records)
 
 
 def _print_comparison(results, modality: str):
@@ -344,6 +349,10 @@ def _build_parser():
     p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     p.add_argument("--no-decompress", action="store_true",
                    help="compress only (skip slow lossless verification)")
+    p.add_argument("--measure-gk", action="store_true",
+                   help="online only: record the prequential g_k and Δ_in at every training "
+                        "boundary into --json (two extra no-grad forwards per boundary; the "
+                        "coding path stays byte-identical). Plot with evaluation/gk_curve.py")
     p.add_argument("--target-modules", default=None,
                    help="comma-separated LoRA target modules (default: per-modality)")
     p.add_argument("--config", default=None, metavar="PATH",

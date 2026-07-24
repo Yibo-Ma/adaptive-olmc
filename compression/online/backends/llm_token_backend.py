@@ -83,3 +83,13 @@ class _LLMTokenBackend(OnlineBackend):
     ) -> List[ChunkUnit]:
         decoded = compressor.decompress_batch(cds, show_progress=True)
         return [ChunkUnit(token_ids=t[0].cpu().tolist()) for t in decoded]
+
+    def measure_interval_bits(
+        self, compressor: BaseCompressor, chunks: List[ChunkUnit]
+    ) -> List[float]:
+        # Mirror encode_interval exactly (same BOS-prefixed padding), so the bits
+        # reported are the ones the coder would bill under the current state.
+        input_ids, attn = pad_token_ids(
+            [c.token_ids for c in chunks], self.pad_id, device=self.device
+        )
+        return compressor.measure_batch_bits(input_ids, attn)

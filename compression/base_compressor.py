@@ -9,6 +9,7 @@ implemented in the subclass via a get_logits_fn callback passed to _decode_batch
 """
 from __future__ import annotations
 
+import math
 from typing import Callable, List, Optional
 
 import numpy as np
@@ -52,6 +53,29 @@ class BaseCompressor:
             compressed_bytes=compressed,
             original_length=len(target),
         )
+
+    # ------------------------------------------------------------------
+    # Measurement twin of the encode kernel (no coder)  — g_k instrument
+    # ------------------------------------------------------------------
+
+    def sequence_nll_bits(
+        self,
+        input_ids: torch.Tensor,     # [1, seq_len]  (includes dummy prefix token)
+        logits: torch.Tensor,        # [1, seq_len-1, vocab]
+        prefix_length: int,
+    ) -> float:
+        """Model code length in bits for input_ids[prefix_length:] under `logits`.
+
+        Same slicing as ``_encode_sequence`` but it sums the model's own
+        −log2 p(symbol) instead of running the range coder.  That sum is the exact
+        log-loss the coder bills, minus its negligible pdf-quantisation overhead —
+        so a *difference* of two such lengths (the g_k / Δ_in instrument) is exact
+        and needs no bitstream.  No coder, no autograd, no state change.
+        """
+        target = input_ids[0, prefix_length:]                           # (data_len,)
+        log_probs = logits[0, prefix_length - 1:, :].log_softmax(dim=-1)  # (data_len, vocab)
+        tok_log_probs = log_probs.gather(1, target.unsqueeze(1)).squeeze(1)
+        return float(-tok_log_probs.sum().item()) / math.log(2.0)
 
     # ------------------------------------------------------------------
     # Shared batch decode loop

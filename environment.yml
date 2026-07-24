@@ -1,14 +1,14 @@
-# One-command conda environment for OnlineLMCompress:
+# One-command conda environment for Adaptive OLMC:
 #
 #     conda env create -f environment.yml
-#     conda activate olmc
+#     conda activate aolmc
 #
 # conda-forge only (the `nodefaults` avoids the Anaconda default-channel ToS prompt).
 # The pip section installs everything in requirements.txt (the HF stack is pinned there).
 #
 # GPU note: `torch` from PyPI is CUDA-enabled on Linux.  To pin a specific CUDA build,
 # after activating run e.g.:  pip install torch --index-url https://download.pytorch.org/whl/cu121
-name: olmc
+name: aolmc
 channels:
   - conda-forge
   - nodefaults

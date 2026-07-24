@@ -105,6 +105,37 @@ class LLMCompressor(BaseCompressor):
             results.append(cd)
         return results
 
+    def measure_batch_bits(
+        self,
+        input_ids: torch.Tensor,       # [B, max_seq_len]  — right-padded data tokens
+        attention_mask: torch.Tensor,  # [B, max_seq_len]  — used to read per-seq lengths
+    ) -> List[float]:
+        """Per-sequence model code length (bits) for a batch — no coder, no grad.
+
+        The measurement twin of ``compress_batch`` (the prompt_ctx=None path used
+        by ``encode_interval``): one forward over the same ``[BOS | data]``
+        construction the coder bills, returning Σ −log2 p per sequence instead of
+        a bitstream.  Used by the g_k instrument; never touches the archive or the
+        model state.
+        """
+        B = input_ids.shape[0]
+        input_ids = input_ids.to(self.device)
+        seq_lens: List[int] = attention_mask.sum(dim=1).long().tolist()
+
+        prefix = torch.full((B, 1), self._dummy_token(), dtype=torch.long, device=self.device)
+        prefix_length = 1
+        full_ids = torch.cat([prefix, input_ids], dim=1)
+        with torch.inference_mode():
+            logits = self.model(full_ids, use_cache=False).logits[:, :-1, :].float()
+
+        bits: List[float] = []
+        for b in range(B):
+            L = int(seq_lens[b])
+            seq_ids    = full_ids[b:b+1, :prefix_length + L]
+            seq_logits = logits[b:b+1, :prefix_length + L - 1, :]
+            bits.append(self.sequence_nll_bits(seq_ids, seq_logits, prefix_length))
+        return bits
+
     def decompress_batch(
         self,
         compressed_list: List[CompressedData],

@@ -103,6 +103,18 @@ class OnlineBackend(ABC):
     ) -> List[ChunkUnit]:
         ...
 
+    def measure_interval_bits(
+        self, compressor: BaseCompressor, chunks: List[ChunkUnit]
+    ) -> List[float]:
+        """Per-chunk model code length (bits) for an interval at the *current*
+        model state — the measurement twin of ``encode_interval`` used by the g_k
+        instrument.  Optional: only backends that implement it support the
+        ``--measure-gk`` diagnostic (currently text/LLM only)."""
+        raise NotImplementedError(
+            f"{type(self).__name__} does not implement measure_interval_bits "
+            f"(g_k measurement is currently text/LLM-only)."
+        )
+
     # ------------------------------------------------------------------
     # Training  (default = next-token CE over concatenated chunk windows)
     # ------------------------------------------------------------------

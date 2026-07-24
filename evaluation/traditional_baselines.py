@@ -21,7 +21,7 @@ Design
   torch-free utils.img_utils / utils.audio_utils loaders for image/audio). None of these
   codecs touch Hugging Face, so the hf-mirror constraint does not apply here.
 * **Pure-Python where possible** (gzip, LZMA2, PNG, WebP, FLAC) so it runs out-of-the-box
-  in the `olmc` env; the three specialised binaries (cjxl, ofr, cmix) are shelled out to
+  in the `aolmc` env; the three specialised binaries (cjxl, ofr, cmix) are shelled out to
   and gracefully skipped with an install hint if not on PATH.
 
 Run from the repo root (flags mirror eval_online.py so you can reuse the same --data):

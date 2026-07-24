@@ -137,7 +137,7 @@ def main() -> int:
         steps += data_steps(args, mirror)
 
     print("=" * 64)
-    print(f"  OnlineLMCompress setup — phase: {args.phase}")
+    print(f"  Adaptive OLMC setup — phase: {args.phase}")
     print("=" * 64)
     for i, (title, argv, soft) in enumerate(steps, 1):
         shown = " ".join(a if " " not in a else f'"{a}"' for a in argv[1:])
