@@ -1,0 +1,47 @@
+# Core
+torch                 # GPU: pip install torch --index-url https://download.pytorch.org/whl/cu121
+numpy
+
+# --- HuggingFace stack: versions PINNED on purpose ---
+# The 2026 releases (transformers 5.x / datasets 5.x / huggingface_hub 1.x) removed
+# dataset loading-script support and tightened Hub file-metadata checks, which breaks
+# the script-based datasets (pile_of_law, medal, edgar_corpus, hupd, ...) *and* is
+# unfriendly to hf-mirror.com.  This 2025 set keeps Qwen3 support while still loading
+# those datasets through the mirror.  Do NOT bump without re-testing scripts/download_text.py.
+transformers==4.53.2
+tokenizers==0.21.2
+huggingface_hub==0.33.4
+datasets==3.6.0       # HF dataset loaders + downloader (last line with loading-script support)
+hf_transfer           # fast Rust downloader; auto-enabled by scripts/_common.py (helps hf-mirror)
+
+peft
+constriction          # range coder backend
+tqdm
+
+# Download / IO stack. These are pulled in transitively by datasets/huggingface_hub
+# today, but scripts/_common.py and scripts/download_text.py import them DIRECTLY, so
+# they are declared here to keep the pipeline robust to a leaner HF install.
+requests              # HTTP downloads with Range/retry (scripts/_common.py)
+pyarrow               # parquet-streamed text datasets (earnings_calls, pmc_patients, ...)
+psutil                # peak-RAM reporting in eval (utils/eval_utils.py; degrades silently if absent)
+
+# Optional: only for `download_models.py --source modelscope`, the token-free route to
+# gated HF repos (e.g. Llama) from a mirror-only / China network. Not needed otherwise.
+# modelscope
+
+# Modality I/O
+pillow                # image (PIL)
+pydub                 # audio chunking
+soundfile             # audio decoding (no ffmpeg needed)
+pandas                # tabular dataset handling
+samplings             # required by bgpt/utils.py
+
+# Traditional baselines (evaluation/traditional_baselines.py); gzip/lzma2/png/webp/flac are
+# stdlib/pillow/soundfile already above.  cjxl / ofr / cmix are external binaries (see the
+# script's INSTALL_HINT), not pip.
+brotli                # brotli text baseline (else the script uses the brotli CLI)
+pillow-jxl-plugin     # JPEG-XL image baseline via Pillow (else the script uses the cjxl CLI)
+
+# Analysis / figures (evaluation/rate_curve.py). The tool always writes its tidy JSON;
+# matplotlib is only needed to render the PNG from it.
+matplotlib

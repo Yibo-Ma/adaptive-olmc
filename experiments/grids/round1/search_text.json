@@ -1,0 +1,25 @@
+{
+  "group_name": "search_text",
+  "note": "Stage-1 hyperparameter search. Proxy model Qwen3-1.7B, dev = pile_of_law_eurlex, small size. Compress-only, recent-only. The winner freezes and transfers to Stage-1.5 (model-scaling) and Stage-3 (headline). chunk_size is a text-only knob (in TOKENS); target_modules coverage is a Stage-4 ablation.",
+  "modality": "text",
+  "fixed": {
+    "model": "checkpoints/Qwen3-1.7B-Base",
+    "data": "data/text/normalized/qwen3/pile_of_law_eurlex",
+    "max_bytes": 8000000,
+    "batch_chunks": 8,
+    "base_seed": 42,
+    "lora_dropout": 0.0,
+    "grad_clip": 1.0,
+    "weight_decay": 0.01,
+    "train_on_all": false,
+    "no_decompress": true
+  },
+  "grid": {
+    "chunk_size": [1024, 2048, 4096],
+    "train_interval": [4, 8, 16],
+    "epochs_per_train": [1, 2, 3],
+    "lr": [3e-05, 1e-04, 3e-04],
+    "lora_r": [8, 16, 32],
+    "target_modules": ["q_proj,k_proj,v_proj,o_proj"]
+  }
+}

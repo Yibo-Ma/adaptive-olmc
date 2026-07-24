@@ -1,0 +1,27 @@
+{
+  "group_name": "search_text_r3",
+  "note": "Stage-1 ROUND 3 (text, Qwen3-1.7B): the chunk-8192 online round. Static probe showed chunk 8192 is best for context, and 8192 requires the decoupled --max-seq-len (training backward is O(msl^2); msl=8192 would OOM on 40GB, msl<=4096 is proven from round 1). Memory contract on 40GB: encode batch <= [2, 8192] -> train_interval in {1,2} and batch_chunks=2; training backward <= [1, 4096]. Sweeps the two knobs that matter at this scale: train_interval (1 = train after EVERY chunk, the most-online schedule; fewer chunks at 8192 make updates scarcer, so ti=1 compensates) x max_seq_len (2048 vs 4096 training window). Adaptation config = round-1 winner (lr 3e-4, r 32, ep 3, attn-only) — UPDATE from round-2 text results when they land (lr/epochs/r/MLP), then re-gen. Compare the winner's online_rate against round-2's chunk-4096 winner: whichever absolute bpc is lower decides the final chunk_size.",
+  "modality": "text",
+  "fixed": {
+    "model": "checkpoints/Qwen3-1.7B-Base",
+    "data": "data/text/normalized/qwen3/pile_of_law_eurlex",
+    "max_bytes": 4000000,
+    "chunk_size": 8192,
+    "batch_chunks": 2,
+    "epochs_per_train": 3,
+    "lr": 3e-04,
+    "lora_r": 32,
+    "lora_alpha": 64,
+    "target_modules": "q_proj,k_proj,v_proj,o_proj",
+    "base_seed": 42,
+    "lora_dropout": 0.0,
+    "grad_clip": 1.0,
+    "weight_decay": 0.01,
+    "train_on_all": false,
+    "no_decompress": true
+  },
+  "grid": {
+    "train_interval": [1, 2],
+    "max_seq_len": [2048, 4096]
+  }
+}

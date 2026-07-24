@@ -1,0 +1,31 @@
+{
+  "group_name": "headline_audio",
+  "note": "Stage-3 main table (audio). Frozen bGPT + Stage-1 winner hyperparams; sweep ONLY the dataset: librispeech + ljspeech (speech; both align the precursor; ljspeech is also dev) + nsynth (music) + esc50 (environmental) -> extends beyond speech. Report each row with FLAC baseline + static + online. librispeech must be downloaded first. REPLACE hyperparams with the Stage-1 audio winner.",
+  "modality": "audio",
+  "fixed": {
+    "model": "checkpoints/bgpt/weights-audio.pth",
+    "chunk_ms": 1000,
+    "audio_clips": 128,
+    "train_interval": 8,
+    "epochs_per_train": 2,
+    "lr": 1e-04,
+    "lora_r": 16,
+    "lora_alpha": 32,
+    "target_modules": "c_attn",
+    "batch_chunks": 8,
+    "base_seed": 42,
+    "lora_dropout": 0.0,
+    "grad_clip": 1.0,
+    "weight_decay": 0.01,
+    "train_on_all": false,
+    "no_decompress": true
+  },
+  "grid": {
+    "data": [
+      "data/audio/librispeech",
+      "data/audio/ljspeech",
+      "data/audio/nsynth",
+      "data/audio/esc50"
+    ]
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "group_name": "models_text_r5",
+  "note": "Stage-1.5 model-scaling (text), on the FROZEN Stage-1 config (chunk8192/msl4096/ti1/ep3/lr3e-4/r32-a64/attn-only/batch2). Sweeps model size on a fixed DEV data size (4M) — picking the headline model does NOT need the plateau size, that comes later in data-scaling. Qwen3 same-gen Base family so the qwen3-normalized data is shared (no re-normalize). Read BOTH static_rate and online_rate vs size: the story is how far online shifts the curve down (= online making a small model match a bigger static one), and the online delta likely NARROWS as the model grows (big base has less headroom). Headline model = best online_rate that is compute-feasible (decompress replays training, expensive at 8B) — not necessarily the largest. 8B is a separate memory-reduced grid (models_text_8b.json).",
+  "modality": "text",
+  "fixed": {
+    "data": "data/text/normalized/qwen3/pile_of_law_eurlex",
+    "max_bytes": 4000000,
+    "chunk_size": 8192,
+    "max_seq_len": 4096,
+    "train_interval": 1,
+    "epochs_per_train": 3,
+    "lr": 3e-04,
+    "lora_r": 32,
+    "lora_alpha": 64,
+    "target_modules": "q_proj,k_proj,v_proj,o_proj",
+    "batch_chunks": 2,
+    "base_seed": 42,
+    "lora_dropout": 0.0,
+    "grad_clip": 1.0,
+    "weight_decay": 0.01,
+    "train_on_all": false,
+    "no_decompress": true
+  },
+  "grid": {
+    "model": [
+      "checkpoints/Qwen3-0.6B-Base",
+      "checkpoints/Qwen3-1.7B-Base",
+      "checkpoints/Qwen3-4B-Base"
+    ]
+  }
+}

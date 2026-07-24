@@ -1,0 +1,29 @@
+{
+  "group_name": "search_text_universal_r7",
+  "note": "GOAL: one config with online delta>0 on ALL THREE text domains (pile_of_law=homogeneous/big-delta, medal=medium, enwik9=diverse/near-zero), while static stays >> traditional (already true: static ratio 9-14x vs traditional 4-5x at chunk 2048). Findings from the chunk sweep drive this grid: (1) delta is inverted-U in chunk_size, peak ~2048 (more LoRA updates than 8192, less overfit than 512); (2) msl MUST equal chunk_size (training context = compression context) — so max_seq_len is NOT set here, eval auto-ties msl=chunk_size, killing the 8192/4096 mismatch; (3) small chunk/msl + big rank + ti=1 overfits each chunk and goes NEGATIVE on heterogeneous data (medal/enwik9), so the two levers swept are the overfitting controls: lora_r (capacity) and lr (step). lora_alpha is left unset so sweep.py auto-sets alpha=2*r (constant scaling). Winner = the (chunk,r,lr) with delta>0 on all three; expect a SMALLER r (8-16) + lower lr (1e-4) to rescue medal/enwik9, at slight cost to pile_of_law. NOTE: enwik9's ceiling is intrinsically low (diverse data has little reusable structure) — target is >=0, not parity with pile_of_law; the delta-vs-domain-homogeneity spectrum is itself a paper result.",
+  "modality": "text",
+  "fixed": {
+    "model": "checkpoints/Qwen3-1.7B-Base",
+    "max_bytes": 4000000,
+    "epochs_per_train": 3,
+    "train_interval": 1,
+    "target_modules": "q_proj,k_proj,v_proj,o_proj",
+    "batch_chunks": 2,
+    "base_seed": 42,
+    "lora_dropout": 0.0,
+    "grad_clip": 1.0,
+    "weight_decay": 0.01,
+    "train_on_all": false,
+    "no_decompress": true
+  },
+  "grid": {
+    "data": [
+      "data/text/normalized/qwen3/pile_of_law_eurlex",
+      "data/text/normalized/qwen3/medal",
+      "data/text/normalized/qwen3/enwik9"
+    ],
+    "chunk_size": [1024, 2048],
+    "lora_r": [8, 16, 32],
+    "lr": [1e-04, 3e-04]
+  }
+}

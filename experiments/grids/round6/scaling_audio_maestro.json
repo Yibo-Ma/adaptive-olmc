@@ -1,0 +1,27 @@
+{
+  "group_name": "scaling_audio_maestro_r6",
+  "note": "round6 = DATA-SCALING WITHIN a single long clip (MAESTRO solo piano, ~12 min ≈ 700 chunks). audio_clips=1 fixed (same clip), --max-chunks scales the stream length WITHOUT changing data content -> the CLEAN amortization axis you wanted. Expect static_rate ~flat (same continuous source: every prefix has ~equal difficulty, no drift like the nsynth prefix problem) and online_rate to fall as the LoRA adapts to THIS clip -> delta = pure in-clip amortization. Frozen config (ti2/ep3/lr3e-4/r32-a64/c_attn/chunk_ms1000). VERIFY first with --max-chunks 64 (round-trip on MAESTRO's 44.1kHz stereo wav). max_chunks above a clip's real length just uses the whole clip. For a per-clip mean (avoid single-clip specialness), rerun pointed at other single clips.",
+  "modality": "audio",
+  "fixed": {
+    "model": "checkpoints/bgpt/weights-audio.pth",
+    "data": "data/audio/maestro",
+    "audio_clips": 1,
+    "chunk_ms": 1000,
+    "lr": 3e-04,
+    "epochs_per_train": 3,
+    "lora_r": 32,
+    "lora_alpha": 64,
+    "target_modules": "c_attn",
+    "train_interval": 2,
+    "batch_chunks": 8,
+    "base_seed": 42,
+    "lora_dropout": 0.0,
+    "grad_clip": 1.0,
+    "weight_decay": 0.01,
+    "train_on_all": false,
+    "no_decompress": true
+  },
+  "grid": {
+    "max_chunks": [64, 128, 256, 512, 700]
+  }
+}

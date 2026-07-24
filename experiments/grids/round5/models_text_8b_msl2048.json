@@ -1,0 +1,29 @@
+{
+  "group_name": "models_text_r5_8b_msl2048",
+  "note": "FALLBACK for the 8B point when models_text_8b.json OOMs in the TRAINING backward (traceback in trainer.py / compute_loss / loss.backward). Drops max_seq_len 4096->2048 to halve the training-activation memory. CAVEAT: this breaks strict comparability with the 1.7B/4B runs (which use msl=4096) — report the 8B online number with an asterisk, or (better, if it fits) re-run 1.7B/4B at msl=2048 too for an apples-to-apples 8B comparison. Does NOT help if the OOM is in the compress FORWARD (that is the chunk_size*vocab logits, ~5GB at chunk 8192, independent of msl) — for that, chunk_size must drop or the prefill must be chunked in code. Everything else = frozen config, batch_chunks=1.",
+  "modality": "text",
+  "fixed": {
+    "data": "data/text/normalized/qwen3/pile_of_law_eurlex",
+    "max_bytes": 4000000,
+    "chunk_size": 8192,
+    "max_seq_len": 2048,
+    "train_interval": 1,
+    "epochs_per_train": 3,
+    "lr": 3e-04,
+    "lora_r": 32,
+    "lora_alpha": 64,
+    "target_modules": "q_proj,k_proj,v_proj,o_proj",
+    "batch_chunks": 1,
+    "base_seed": 42,
+    "lora_dropout": 0.0,
+    "grad_clip": 1.0,
+    "weight_decay": 0.01,
+    "train_on_all": false,
+    "no_decompress": true
+  },
+  "grid": {
+    "model": [
+      "checkpoints/Qwen3-8B-Base"
+    ]
+  }
+}

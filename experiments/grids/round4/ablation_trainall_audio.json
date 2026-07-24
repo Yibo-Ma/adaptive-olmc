@@ -1,0 +1,26 @@
+{
+  "group_name": "ablation_trainall_audio",
+  "note": "Stage-1 CLOSED (search converged in rounds 1-3): lr=3e-4, r=32/alpha=64, attn-only, epochs=3, train_interval=2 (round3: ti=1 has NO consistent gain on audio/image and costs 1.2-1.6x; ljspeech even prefers ti=2). This round is NOT a search — it is the one untested METHOD axis the paper needs: train_on_recent-interval (false) vs train_on_all-seen (true). Scale is deliberately reduced (audio_clips 128->16) because train_on_all retrains on the whole growing history each interval (O(n^2)); the ablation is a same-scale relative comparison so the smaller baseline is fine. If true wins by a real margin, it becomes a compute/ratio Pareto point; if not, recent-only is confirmed as the efficient default.",
+  "modality": "audio",
+  "fixed": {
+    "model": "checkpoints/bgpt/weights-audio.pth",
+    "chunk_ms": 1000,
+    "audio_clips": 16,
+    "lr": 3e-04,
+    "epochs_per_train": 3,
+    "lora_r": 32,
+    "lora_alpha": 64,
+    "target_modules": "c_attn",
+    "train_interval": 2,
+    "batch_chunks": 8,
+    "base_seed": 42,
+    "lora_dropout": 0.0,
+    "grad_clip": 1.0,
+    "weight_decay": 0.01,
+    "no_decompress": true
+  },
+  "grid": {
+    "data": ["data/audio/ljspeech", "data/audio/nsynth"],
+    "train_on_all": [false, true]
+  }
+}

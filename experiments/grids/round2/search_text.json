@@ -1,0 +1,25 @@
+{
+  "group_name": "search_text_r2",
+  "note": "Stage-1 ROUND 2 (text, Qwen3-1.7B). Round-1 winner = chunk_size 4096, lr 3e-4, lora_r 32, train_interval 4, epochs 3 (online 0.483, delta 12.4%) — ALL on edges. chunk_size PINNED to the winner 4096 (a real text knob; static keeps dropping with it, and larger chunks also suppress the overfitting seen at chunk 1024). Round 2 extends the four adaptation edges (lr up, r up, epochs up, train_interval down) + adds the MLP axis. WATCH overfitting: aggressive lr/epochs went NEGATIVE at small chunk in round 1, so a run that turns worse marks the interior optimum. max_bytes 8e6 -> 4e6 (text is compute-heavy; ranking is stable at 4MB). If a knob is still on an edge after round 2, extend again in round 3 (and test chunk_size 8192 there).",
+  "modality": "text",
+  "fixed": {
+    "model": "checkpoints/Qwen3-1.7B-Base",
+    "data": "data/text/normalized/qwen3/pile_of_law_eurlex",
+    "max_bytes": 4000000,
+    "chunk_size": 4096,
+    "batch_chunks": 8,
+    "base_seed": 42,
+    "lora_dropout": 0.0,
+    "grad_clip": 1.0,
+    "weight_decay": 0.01,
+    "train_on_all": false,
+    "no_decompress": true
+  },
+  "grid": {
+    "train_interval": [2, 4],
+    "epochs_per_train": [3, 5],
+    "lr": [3e-04, 5e-04, 1e-03],
+    "lora_r": [32, 64],
+    "target_modules": ["q_proj,k_proj,v_proj,o_proj", "q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj"]
+  }
+}

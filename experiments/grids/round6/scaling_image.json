@@ -1,0 +1,27 @@
+{
+  "group_name": "scaling_image_r6",
+  "note": "round6 = Stage-2 DATA-SCALING (image), on the FROZEN config (ti2/ep3/lr3e-4/r32-a64/c_attn/image_px32). Uses clic2024 FULL images (image_crop=0) — NO div2k download: one CLIC pro image ≈ 2600 patches, so 24 images already give a >10x stream-length ladder (~5.2k -> ~62k patches). Non-32-multiple sizes are auto-padded losslessly (patchify pads W/H up to a multiple of 32, reassembly crops back to the original size via framing). mode=both + no_decompress -> static_rate + online_rate + delta per run. Plot both vs image_count: static_rate ~flat (no training), online_rate falls with data -> plateau = headline size, crossover = where online beats static. SLOWEST point image_count=24 (~62k patches x ti=2 ≈ 31k train steps) — will take a while, but bGPT is small. If the clic2024 dir has more than 24 images, raise the top of the ladder.",
+  "modality": "image",
+  "fixed": {
+    "model": "checkpoints/bgpt/weights-image.pth",
+    "data": "data/image/clic2024",
+    "image_px": 32,
+    "image_crop": 0,
+    "lr": 3e-04,
+    "epochs_per_train": 3,
+    "lora_r": 32,
+    "lora_alpha": 64,
+    "target_modules": "c_attn",
+    "train_interval": 2,
+    "batch_chunks": 8,
+    "base_seed": 42,
+    "lora_dropout": 0.0,
+    "grad_clip": 1.0,
+    "weight_decay": 0.01,
+    "train_on_all": false,
+    "no_decompress": true
+  },
+  "grid": {
+    "image_count": [2, 4, 8, 16, 24]
+  }
+}

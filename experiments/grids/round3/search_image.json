@@ -1,0 +1,27 @@
+{
+  "group_name": "search_image_r3",
+  "note": "Stage-1 ROUND 3 (image, bGPT, clic2024). Round-2 CONVERGED lr=3e-4 (higher diverges), lora_r=32 (64 overfits), attn-only (MLP fine at 3e-4 but goes very negative at higher lr) — all FROZEN. Only the two mild edges remain: train_interval (2 beat 4; test 1) x epochs (clic liked 5>3). 4 runs -> then freeze. Image online gain is intrinsically small (~2.5-2.7% on clic at dev scale); its real magnitude comes from Stage-2 data scaling, not more tuning.",
+  "modality": "image",
+  "fixed": {
+    "model": "checkpoints/bgpt/weights-image.pth",
+    "data": "data/image/clic2024",
+    "image_px": 32,
+    "image_count": 24,
+    "image_crop": 256,
+    "lr": 3e-04,
+    "lora_r": 32,
+    "lora_alpha": 64,
+    "target_modules": "c_attn",
+    "batch_chunks": 8,
+    "base_seed": 42,
+    "lora_dropout": 0.0,
+    "grad_clip": 1.0,
+    "weight_decay": 0.01,
+    "train_on_all": false,
+    "no_decompress": true
+  },
+  "grid": {
+    "train_interval": [1, 2],
+    "epochs_per_train": [3, 5]
+  }
+}

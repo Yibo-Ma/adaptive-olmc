@@ -1,0 +1,26 @@
+{
+  "group_name": "search_image",
+  "note": "Stage-1 search. bGPT image, c_attn LoRA, dev = clic2024. 256px crops keep each run fast for ranking; Stage-3 uses full images. Compress-only, recent-only. chunk_size is irrelevant to bGPT (fixed patch structure) so it is not swept.",
+  "modality": "image",
+  "fixed": {
+    "model": "checkpoints/bgpt/weights-image.pth",
+    "data": "data/image/usc_textures",
+    "image_px": 32,
+    "image_count": 24,
+    "image_crop": 256,
+    "batch_chunks": 8,
+    "base_seed": 42,
+    "lora_dropout": 0.0,
+    "grad_clip": 1.0,
+    "weight_decay": 0.01,
+    "train_on_all": false,
+    "no_decompress": true
+  },
+  "grid": {
+    "train_interval": [4, 8, 16],
+    "epochs_per_train": [1, 2, 3],
+    "lr": [3e-05, 1e-04, 3e-04],
+    "lora_r": [8, 16, 32],
+    "target_modules": ["c_attn"]
+  }
+}

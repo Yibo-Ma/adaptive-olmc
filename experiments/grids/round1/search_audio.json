@@ -1,0 +1,25 @@
+{
+  "group_name": "search_audio",
+  "note": "Stage-1 search. bGPT audio, c_attn LoRA, dev = ljspeech, 1s WAV chunks. Compress-only, recent-only. audio_clips over-provisions and degrades to whatever the dir holds.",
+  "modality": "audio",
+  "fixed": {
+    "model": "checkpoints/bgpt/weights-audio.pth",
+    "data": "data/audio/ljspeech",
+    "chunk_ms": 1000,
+    "audio_clips": 32,
+    "batch_chunks": 8,
+    "base_seed": 42,
+    "lora_dropout": 0.0,
+    "grad_clip": 1.0,
+    "weight_decay": 0.01,
+    "train_on_all": false,
+    "no_decompress": true
+  },
+  "grid": {
+    "train_interval": [4, 8, 16],
+    "epochs_per_train": [1, 2, 3],
+    "lr": [3e-05, 1e-04, 3e-04],
+    "lora_r": [8, 16, 32],
+    "target_modules": ["c_attn"]
+  }
+}

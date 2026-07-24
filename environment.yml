@@ -1,0 +1,20 @@
+# One-command conda environment for OnlineLMCompress:
+#
+#     conda env create -f environment.yml
+#     conda activate olmc
+#
+# conda-forge only (the `nodefaults` avoids the Anaconda default-channel ToS prompt).
+# The pip section installs everything in requirements.txt (the HF stack is pinned there).
+#
+# GPU note: `torch` from PyPI is CUDA-enabled on Linux.  To pin a specific CUDA build,
+# after activating run e.g.:  pip install torch --index-url https://download.pytorch.org/whl/cu121
+name: olmc
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.11
+  - pip
+  - ffmpeg            # audio I/O for pydub
+  - pip:
+      - -r requirements.txt

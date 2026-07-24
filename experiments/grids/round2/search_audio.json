@@ -1,0 +1,25 @@
+{
+  "group_name": "search_audio_r2",
+  "note": "Stage-1 ROUND 2 (audio, bGPT, ljspeech). Round-1 winner = lr 3e-4, epochs 3, lora_r 32, train_interval 4 (online 1.760, delta 2.37%) — all on edges; every train_interval=16 run OOM'd. Round 2 extends the edges: lr up, epochs up, r up, and train_interval DOWN to [2,4] (4 was the min/best; smaller = more updates AND less memory), + the MLP axis. train_interval is kept <=4 (16 OOM'd; +MLP/r64 raise memory, but small train_interval keeps the encode batch small). audio_clips=128 (was under-provisioned in round 1). If lora_r=64 + MLP still OOMs at train_interval 4, drop to [2] or ask for the micro-batch fix.",
+  "modality": "audio",
+  "fixed": {
+    "model": "checkpoints/bgpt/weights-audio.pth",
+    "data": "data/audio/ljspeech",
+    "chunk_ms": 1000,
+    "audio_clips": 128,
+    "batch_chunks": 8,
+    "base_seed": 42,
+    "lora_dropout": 0.0,
+    "grad_clip": 1.0,
+    "weight_decay": 0.01,
+    "train_on_all": false,
+    "no_decompress": true
+  },
+  "grid": {
+    "train_interval": [2, 4],
+    "epochs_per_train": [3, 5],
+    "lr": [3e-04, 5e-04, 1e-03],
+    "lora_r": [32, 64],
+    "target_modules": ["c_attn", "c_attn,c_fc,c_proj"]
+  }
+}

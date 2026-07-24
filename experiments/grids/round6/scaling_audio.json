@@ -1,0 +1,26 @@
+{
+  "group_name": "scaling_audio_r6",
+  "note": "round6 = Stage-2 DATA-SCALING (audio), on the FROZEN config (ti2/ep3/lr3e-4/r32-a64/c_attn/chunk_ms1000). Sweeps stream length via audio_clips to trace how the online delta GROWS with data (amortization) and where it plateaus / crosses static. ljspeech (general speech) is the representative dev set (clic2024 is image-only; audio stays on ljspeech). NEEDS >=256 clips present: python scripts/download_audio.py --dataset ljspeech --limit 256. mode=both + no_decompress -> static_rate + online_rate + delta per run. Plot both vs audio_clips -> plateau = headline size, crossover = where online first beats static. Optional 2nd curve: copy this grid with data=nsynth (homogeneous -> saturates earlier).",
+  "modality": "audio",
+  "fixed": {
+    "model": "checkpoints/bgpt/weights-audio.pth",
+    "data": "data/audio/ljspeech",
+    "chunk_ms": 1000,
+    "lr": 3e-04,
+    "epochs_per_train": 3,
+    "lora_r": 32,
+    "lora_alpha": 64,
+    "target_modules": "c_attn",
+    "train_interval": 2,
+    "batch_chunks": 8,
+    "base_seed": 42,
+    "lora_dropout": 0.0,
+    "grad_clip": 1.0,
+    "weight_decay": 0.01,
+    "train_on_all": false,
+    "no_decompress": true
+  },
+  "grid": {
+    "audio_clips": [16, 32, 64, 128, 256]
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "group_name": "headline_text",
+  "note": "Stage-3 main table (text). Frozen model + Stage-1 winner hyperparams + Stage-2 plateau size; sweep ONLY the dataset. Datasets ordered by structure: natural language (enwik8) -> domain-specialized (legal, medical) -> semi-structured (code); expected online-over-static gain increases along this spectrum. pile_of_law_eurlex is also the dev set (note in the paper, or report its val slice). Report every row with traditional baselines + static + online. REPLACE model + hyperparams with your model-study / Stage-1 winner; set max_bytes to the Stage-2 plateau (each dataset self-caps). This grid's fixed block is the single source of truth cloned by Stage 2 / Stage 4.",
+  "modality": "text",
+  "fixed": {
+    "model": "checkpoints/Qwen3-4B-Base",
+    "max_bytes": 256000000,
+    "chunk_size": 2048,
+    "train_interval": 8,
+    "epochs_per_train": 2,
+    "lr": 1e-04,
+    "lora_r": 16,
+    "lora_alpha": 32,
+    "target_modules": "q_proj,k_proj,v_proj,o_proj",
+    "batch_chunks": 8,
+    "base_seed": 42,
+    "lora_dropout": 0.0,
+    "grad_clip": 1.0,
+    "weight_decay": 0.01,
+    "train_on_all": false,
+    "no_decompress": true
+  },
+  "grid": {
+    "data": [
+      "data/text/normalized/qwen3/enwik8",
+      "data/text/normalized/qwen3/pile_of_law_eurlex",
+      "data/text/normalized/qwen3/medal",
+      "data/text/normalized/qwen3/codesearchnet"
+    ]
+  }
+}

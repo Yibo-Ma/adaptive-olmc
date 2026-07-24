@@ -1,0 +1,27 @@
+{
+  "group_name": "ablation_trainall_text",
+  "note": "Stage-1 CLOSED. Frozen: chunk_size=8192, max_seq_len=4096, lr=3e-4, r=32/alpha=64, attn-only (q,k,v,o), epochs=3, train_interval=1 (text DOES prefer ti=1: 0.459 vs 0.465 bpc). The one untested METHOD axis: train_on_recent (false) vs train_on_all-seen (true). max_bytes reduced 4M->1M because all-seen training at chunk 8192 is O(n^2) in windows and the slowest case here; if the true run times out, drop max_bytes further (500000) — it is a relative comparison. Expect true to help MOST on text (long-range domain drift) if it helps anywhere.",
+  "modality": "text",
+  "fixed": {
+    "model": "checkpoints/Qwen3-1.7B-Base",
+    "data": "data/text/normalized/qwen3/pile_of_law_eurlex",
+    "max_bytes": 1000000,
+    "chunk_size": 8192,
+    "max_seq_len": 4096,
+    "batch_chunks": 2,
+    "lr": 3e-04,
+    "epochs_per_train": 3,
+    "lora_r": 32,
+    "lora_alpha": 64,
+    "target_modules": "q_proj,k_proj,v_proj,o_proj",
+    "train_interval": 1,
+    "base_seed": 42,
+    "lora_dropout": 0.0,
+    "grad_clip": 1.0,
+    "weight_decay": 0.01,
+    "no_decompress": true
+  },
+  "grid": {
+    "train_on_all": [false, true]
+  }
+}

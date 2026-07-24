@@ -1,0 +1,25 @@
+{
+  "group_name": "probe_chunk_text",
+  "note": "Round-2 chunk_size probe (text). Round-1's chunk_size winner (4096) was the grid EDGE, so this cheaply tests whether 8192 is better, holding the round-1 winner's adaptation config fixed (lr 3e-4, r 32, epochs 3, attn-only). train_interval PINNED to 2: keeps the encode batch small enough for a 40GB card ([2,8192]=16K tokens; round 1 OOM'd at [16,4096]=64K) AND compensates for the fewer chunks a larger chunk_size makes (more updates). If 8192 wins, pin chunk_size=8192 downstream; else 4096 is confirmed. Runs alongside search_text.json (which pins chunk 4096).",
+  "modality": "text",
+  "fixed": {
+    "model": "checkpoints/Qwen3-1.7B-Base",
+    "data": "data/text/normalized/qwen3/pile_of_law_eurlex",
+    "max_bytes": 4000000,
+    "train_interval": 2,
+    "epochs_per_train": 3,
+    "lr": 3e-04,
+    "lora_r": 32,
+    "target_modules": "q_proj,k_proj,v_proj,o_proj",
+    "batch_chunks": 8,
+    "base_seed": 42,
+    "lora_dropout": 0.0,
+    "grad_clip": 1.0,
+    "weight_decay": 0.01,
+    "train_on_all": false,
+    "no_decompress": true
+  },
+  "grid": {
+    "chunk_size": [4096, 8192]
+  }
+}

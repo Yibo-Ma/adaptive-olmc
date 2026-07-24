@@ -1,0 +1,25 @@
+{
+  "group_name": "probe_overfit_enwik_r8",
+  "note": "GOAL: locate the ONLINE-OVERFITTING regime, where an update actively HURTS the code rate of the chunks that follow (delta_pct <= 0) rather than merely gaining less. The previous sweep cannot show this: every cell there is positive (enwik9 stays +2.89% even at r=48), i.e. capacity misallocation, not harm. The recipe comes from round7's own finding: 'small chunk/msl + big rank + ti=1 overfits each chunk and goes NEGATIVE on heterogeneous data'. So we hold the most heterogeneous stream (enwik9) and the highest capacity, and shrink the compression/training unit — smaller chunk_size means (a) msl shrinks with it (auto-tied), so each update sees less and narrower context, and (b) 2MB yields ~4x more chunks, hence ~4x more updates at ti=1. Expect a monotone slide toward and past zero as chunk_size drops 2048 -> 1024 -> 512, with r=48 crossing before r=32. The point is the BOUNDARY, not the best number: it defines when adaptation stops paying, which is exactly what a closed-loop gate would have to detect. CAVEAT on the instrument: a static-vs-online curve conflates 'this update was bad' with 'this chunk is intrinsically hard'; only the prequential gap g_k (same next interval scored under pre- vs post-update weights) isolates an update's marginal effect. Use these runs to find where harm lives, then measure it properly with g_k. Runtime note: chunk 512 on 2MB is ~976 chunks = ~976 updates at ti=1; expect ~1.5-2x the wall time of the chunk-2048 runs.",
+  "modality": "text",
+  "fixed": {
+    "model": "checkpoints/Qwen3-0.6B-Base",
+    "data": "data/text/raw/enwik9",
+    "max_bytes": 2000000,
+    "batch_chunks": 8,
+    "lr": 1e-04,
+    "epochs_per_train": 3,
+    "train_interval": 1,
+    "target_modules": "q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj",
+    "base_seed": 42,
+    "lora_dropout": 0.0,
+    "grad_clip": 1.0,
+    "weight_decay": 0.01,
+    "train_on_all": false,
+    "no_decompress": true
+  },
+  "grid": {
+    "chunk_size": [512, 1024],
+    "lora_r": [32, 48]
+  }
+}

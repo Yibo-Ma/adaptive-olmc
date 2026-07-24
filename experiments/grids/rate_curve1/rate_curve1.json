@@ -1,0 +1,29 @@
+{
+  "group_name": "rate_curve1",
+  "note": "GOAL: produce per-chunk rate curves (evaluation/rate_curve.py) for the two findings the aggregate sweep already established but cannot SHOW. This grid deliberately re-runs the 2MB slice of the previous sweep at identical settings, so delta_pct must reproduce those numbers exactly (pile_of_law 15.33/16.79/17.23, enwik9 4.03/3.63/2.89, beancounter 8.93/11.15/12.14 for r=16/32/48) — a free regression check that logging chunk_bits/chunk_lengths in eval_online perturbs nothing. What the curves add: (F1) the r=32 row across the three datasets gives the money figure — gains accumulate along the stream, static stays flat — and because --max-bytes takes a PREFIX, one run's cumulative curve also contains the delta-vs-stream-length axis, so no separate size runs are needed. (F3/P3) the lora_r axis makes the capacity x heterogeneity CROSSOVER visible per chunk: rank up helps the homogeneous streams (law/finance) and HURTS the diverse one (enwik9, -30% relative from r16 to r48), consistent across all three sizes in the previous sweep. Mechanism claim to test on the curves: on enwik9 the extra capacity overfits the current locale, so the damage should appear right AFTER update boundaries. NOTE all deltas here are still POSITIVE — this grid shows capacity MISALLOCATION, not harm; for actual harm (delta<0) see probe_overfit_enwik.json. max_seq_len is intentionally unset so eval auto-ties msl=chunk_size (training context = compression context). lora_alpha unset -> sweep sets alpha=2*r.",
+  "modality": "text",
+  "fixed": {
+    "model": "checkpoints/Qwen3-0.6B-Base",
+    "max_bytes": 2000000,
+    "chunk_size": 2048,
+    "batch_chunks": 8,
+    "lr": 1e-04,
+    "epochs_per_train": 3,
+    "train_interval": 1,
+    "target_modules": "q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj",
+    "base_seed": 42,
+    "lora_dropout": 0.0,
+    "grad_clip": 1.0,
+    "weight_decay": 0.01,
+    "train_on_all": false,
+    "no_decompress": true
+  },
+  "grid": {
+    "data": [
+      "data/text/raw/pile_of_law_eurlex",
+      "data/text/raw/enwik9",
+      "data/text/raw/beancounter"
+    ],
+    "lora_r": [16, 32, 64]
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "group_name": "search_audio_r3",
+  "note": "Stage-1 ROUND 3 (audio, bGPT, ljspeech). Round-2 CONVERGED lr=3e-4 (5e-4/1e-3 diverge -> negative delta), lora_r=32 (64 overfits), attn-only (MLP is fragile: fine at 3e-4, blows up at higher lr). Those are FROZEN here. Only the two mild remaining edges are swept: train_interval (was 2>4; test 1) x epochs (nsynth liked 5>3). 4 runs -> then freeze. ljspeech is the report-speech dev; nsynth (single-instrument, homogeneous) showed a much bigger delta (~5.6% vs ~2.5%) — that spread is a paper result, tune here on ljspeech.",
+  "modality": "audio",
+  "fixed": {
+    "model": "checkpoints/bgpt/weights-audio.pth",
+    "data": "data/audio/ljspeech",
+    "chunk_ms": 1000,
+    "audio_clips": 128,
+    "lr": 3e-04,
+    "lora_r": 32,
+    "lora_alpha": 64,
+    "target_modules": "c_attn",
+    "batch_chunks": 8,
+    "base_seed": 42,
+    "lora_dropout": 0.0,
+    "grad_clip": 1.0,
+    "weight_decay": 0.01,
+    "train_on_all": false,
+    "no_decompress": true
+  },
+  "grid": {
+    "train_interval": [1, 2],
+    "epochs_per_train": [3, 5]
+  }
+}

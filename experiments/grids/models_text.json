@@ -1,0 +1,30 @@
+{
+  "group_name": "models_text",
+  "note": "Stage-1.5 model-scaling: fix the Stage-1 winner hyperparameters + dev dataset, sweep ONLY the model. All Qwen3 -> they share the qwen3-normalized data (tokenizer must match). Answers 'does a bigger model compress better, and does the online gain hold across sizes?' and picks the headline model (best that is compute-feasible). REPLACE the fixed hyperparams below with your Stage-1 winner.",
+  "modality": "text",
+  "fixed": {
+    "data": "data/text/normalized/qwen3/pile_of_law_eurlex",
+    "max_bytes": 16000000,
+    "chunk_size": 2048,
+    "train_interval": 8,
+    "epochs_per_train": 2,
+    "lr": 1e-04,
+    "lora_r": 16,
+    "lora_alpha": 32,
+    "target_modules": "q_proj,k_proj,v_proj,o_proj",
+    "batch_chunks": 8,
+    "base_seed": 42,
+    "lora_dropout": 0.0,
+    "grad_clip": 1.0,
+    "weight_decay": 0.01,
+    "train_on_all": false,
+    "no_decompress": true
+  },
+  "grid": {
+    "model": [
+      "checkpoints/Qwen3-1.7B-Base",
+      "checkpoints/Qwen3-4B-Base",
+      "checkpoints/Qwen3-8B-Base"
+    ]
+  }
+}

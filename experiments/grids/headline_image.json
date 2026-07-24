@@ -1,0 +1,31 @@
+{
+  "group_name": "headline_image",
+  "note": "Stage-3 main table (image). Full images (image_crop 0). Frozen bGPT + Stage-1 winner hyperparams; sweep ONLY the dataset: kodak (lossless benchmark) + clic2024 (aligns precursor CLIC; also dev) + usc_textures (texture). Report each row with traditional baselines (PNG/JPEG-XL/WebP) + static + online. kodak and usc_textures must be downloaded first. REPLACE hyperparams with the Stage-1 image winner.",
+  "modality": "image",
+  "fixed": {
+    "model": "checkpoints/bgpt/weights-image.pth",
+    "image_px": 32,
+    "image_count": 24,
+    "image_crop": 0,
+    "train_interval": 8,
+    "epochs_per_train": 2,
+    "lr": 1e-04,
+    "lora_r": 16,
+    "lora_alpha": 32,
+    "target_modules": "c_attn",
+    "batch_chunks": 8,
+    "base_seed": 42,
+    "lora_dropout": 0.0,
+    "grad_clip": 1.0,
+    "weight_decay": 0.01,
+    "train_on_all": false,
+    "no_decompress": true
+  },
+  "grid": {
+    "data": [
+      "data/image/kodak",
+      "data/image/clic2024",
+      "data/image/usc_textures"
+    ]
+  }
+}

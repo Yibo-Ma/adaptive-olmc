@@ -1,0 +1,29 @@
+{
+  "group_name": "models_text_r5_8b",
+  "note": "Stage-1.5 model-scaling, the 8B point — split out because it needs a memory-reduced run and MAY be infeasible. fp32 8B is ~32GB of weights ALONE (determinism/losslessness forbid bf16/fp16, since decode must bit-exactly replay training), so on a 40GB card it will OOM even here; it wants a >=80GB GPU. Only batch_chunks is dropped (2->1): it affects static speed/memory but NOT static_rate, so max_seq_len stays 4096 to keep the online number comparable to the 1.7B/4B runs. OOM ladder: if it still OOMs, drop max_seq_len to 2048 (note that this breaks strict comparability with the smaller models); if still OOM, 8B needs a bigger card or model-scaling stops at 4B. Everything else is the frozen config, identical to models_text.json.",
+  "modality": "text",
+  "fixed": {
+    "data": "data/text/normalized/qwen3/pile_of_law_eurlex",
+    "max_bytes": 4000000,
+    "chunk_size": 8192,
+    "max_seq_len": 4096,
+    "train_interval": 1,
+    "epochs_per_train": 3,
+    "lr": 3e-04,
+    "lora_r": 32,
+    "lora_alpha": 64,
+    "target_modules": "q_proj,k_proj,v_proj,o_proj",
+    "batch_chunks": 1,
+    "base_seed": 42,
+    "lora_dropout": 0.0,
+    "grad_clip": 1.0,
+    "weight_decay": 0.01,
+    "train_on_all": false,
+    "no_decompress": true
+  },
+  "grid": {
+    "model": [
+      "checkpoints/Qwen3-8B-Base"
+    ]
+  }
+}

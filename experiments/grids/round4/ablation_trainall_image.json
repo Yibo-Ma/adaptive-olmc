@@ -1,0 +1,27 @@
+{
+  "group_name": "ablation_trainall_image",
+  "note": "Stage-1 CLOSED. Frozen: lr=3e-4, r=32/alpha=64, attn-only, epochs=3, train_interval=2 (round3: ti=1 no consistent gain, 1.5x cost). The one untested METHOD axis: train_on_recent (false) vs train_on_all-seen (true). Scale reduced (image_count 24->8) to keep the O(n^2) all-seen training feasible; same-scale relative comparison. Image online gain is intrinsically small at dev scale — the real magnitude is Stage-2 data scaling (image_count up), not this.",
+  "modality": "image",
+  "fixed": {
+    "model": "checkpoints/bgpt/weights-image.pth",
+    "image_px": 32,
+    "image_count": 8,
+    "image_crop": 256,
+    "lr": 3e-04,
+    "epochs_per_train": 3,
+    "lora_r": 32,
+    "lora_alpha": 64,
+    "target_modules": "c_attn",
+    "train_interval": 2,
+    "batch_chunks": 8,
+    "base_seed": 42,
+    "lora_dropout": 0.0,
+    "grad_clip": 1.0,
+    "weight_decay": 0.01,
+    "no_decompress": true
+  },
+  "grid": {
+    "data": ["data/image/clic2024", "data/image/usc_textures"],
+    "train_on_all": [false, true]
+  }
+}

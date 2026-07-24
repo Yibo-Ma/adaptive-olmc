@@ -1,0 +1,20 @@
+# data & weights (large; populate locally, keep only the dir skeleton)
+/data/**
+!/data/**/
+!/data/**/.gitkeep
+/checkpoints/**
+!/checkpoints/**/
+!/checkpoints/.gitkeep
+/datasets
+
+# python / artifacts
+__pycache__/
+*.pyc
+compressed.bin
+*.lmc
+tmp/
+temp_img
+submit_slurm.sh
+
+# results (sweeps, figures, curves — produced locally, synced out-of-band)
+/results/**

@@ -1,0 +1,18 @@
+{
+  "group_name": "probe_imagepx_image",
+  "note": "STATIC-ONLY probe: does a LARGER compression unit lower the base rate on bGPT-image? text found chunk_size up = better; for bGPT the hard ceiling is PATCH_LENGTH(512)*PATCH_SIZE(16)=8192 bytes/unit, and image at px=32 only uses ~196/512 patches (38%), so px can grow to ~48-52 (48^2*3+54=6966B=~437 patches). This sweeps image_px on FULL images (image_crop=0, so padding waste from non-divisible sizes is counted honestly in bpsp). Read static_rate in summary.csv: if it drops as px grows, the larger-unit theory holds for image (then check online + whether backward OOMs — bGPT is small, likely fine). If static_rate is flat/rises, image is already near its effective ceiling too. No LoRA/training here — pure base-rate probe.",
+  "modality": "image",
+  "fixed": {
+    "model": "checkpoints/bgpt/weights-image.pth",
+    "image_count": 2,
+    "image_crop": 0,
+    "batch_chunks": 8,
+    "base_seed": 42,
+    "mode": "static",
+    "no_decompress": true
+  },
+  "grid": {
+    "data": ["data/image/clic2024", "data/image/usc_textures"],
+    "image_px": [32, 40, 48, 52]
+  }
+}

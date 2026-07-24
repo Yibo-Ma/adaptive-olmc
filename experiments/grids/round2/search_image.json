@@ -1,0 +1,26 @@
+{
+  "group_name": "search_image_r2",
+  "note": "Stage-1 ROUND 2 (image, bGPT, usc_textures). Round-1 winner on ALL four edges (lr 3e-4 max, train_interval 4 min, epochs 3 max, lora_r 32 max; usc delta 1.16%, clic 2.30%), so round 2 EXTENDS every edge outward (lr up, epochs up, r up, train_interval down) and adds the MLP target_modules axis (c_attn vs +c_fc,c_proj). Data unchanged from round 1 for clean attribution — bigger data belongs in Stage 2, not here. (clic2024 showed a larger delta than usc here; if you want to tune on it instead, swap fixed.data.) If a knob is STILL on an edge after round 2, extend again in round 3.",
+  "modality": "image",
+  "fixed": {
+    "model": "checkpoints/bgpt/weights-image.pth",
+    "data": "data/image/usc_textures",
+    "image_px": 32,
+    "image_count": 24,
+    "image_crop": 256,
+    "batch_chunks": 8,
+    "base_seed": 42,
+    "lora_dropout": 0.0,
+    "grad_clip": 1.0,
+    "weight_decay": 0.01,
+    "train_on_all": false,
+    "no_decompress": true
+  },
+  "grid": {
+    "train_interval": [2, 4],
+    "epochs_per_train": [3, 5],
+    "lr": [3e-04, 5e-04, 1e-03],
+    "lora_r": [32, 64],
+    "target_modules": ["c_attn", "c_attn,c_fc,c_proj"]
+  }
+}
