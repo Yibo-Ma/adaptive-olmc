@@ -79,6 +79,25 @@ os.environ.setdefault("HF_HUB_ETAG_TIMEOUT", "30")
 os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "30")
 
 
+def set_hf_transfer(enabled: bool) -> None:
+    """Flip the hf_transfer Rust fast-path on/off for *subsequent* HF downloads.
+
+    huggingface_hub reads ``HF_HUB_ENABLE_HF_TRANSFER`` into a module constant at
+    import (constants.py) and every download checks ``constants.HF_HUB_ENABLE_HF_TRANSFER``
+    live — so flipping the env var alone is too late once the library is loaded; we
+    patch the constant as well.  This lets download_models.py retry a failed pull
+    with the fast-path disabled: hf_transfer silently writes 0 bytes on some
+    networks, and the pure-Python HTTP downloader is the fallback that works
+    wherever raw HTTP does.
+    """
+    os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1" if enabled else "0"
+    try:
+        import huggingface_hub.constants as _c
+        _c.HF_HUB_ENABLE_HF_TRANSFER = enabled
+    except Exception:
+        pass
+
+
 # --------------------------------------------------------------------------
 # Sizes / pretty printing
 # --------------------------------------------------------------------------

@@ -58,6 +58,8 @@ def test_aggregates():
     _close(gk.stream_g(bs, "bpb"), (80.0 - 40.0) / 800.0)   # size-weighted = 0.05
     _close(gk.stream_g(bs, "rel"), 40.0 / 1600.0)          # 0.025
     _close(gk.mean_din(bs, "rel"), (0.05 + 0.25) / 2)      # 0.15
+    # transfer efficiency = total g_bits / total Δ_in bits = (80-40)/(40+200)
+    _close(gk.transfer_efficiency(bs), 40.0 / 240.0)
 
 
 def test_empty_and_zero_denominator():

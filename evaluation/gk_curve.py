@@ -52,9 +52,10 @@ from typing import List, Optional
 # Per-boundary g_k normalisations.  "rel" is a fraction shown as a percent; the
 # other two are already in their stated unit.  bits/token is tokenizer-dependent
 # (hence not a default) — kept only as an internal cross-check.
-UNIT_LABEL = {"rel": "% of next interval's pre-update cost",
+UNIT_LABEL = {"rel": "% of pre-update cost",
               "bpb": "bits/byte", "bpt": "bits/token"}
 UNIT_SCALE = {"rel": 100.0, "bpb": 1.0, "bpt": 1.0}
+UNIT_SUFFIX = {"rel": "%", "bpb": " bpb", "bpt": " b/tok"}   # compact label for on-figure stats
 
 
 # ---------------------------------------------------------------------------
@@ -134,6 +135,15 @@ def stream_g(bs: List[Boundary], unit: str) -> float:
     return num / den if den else 0.0
 
 
+def transfer_efficiency(bs: List[Boundary]) -> float:
+    """Stream-level g_k / Δ_in — the fraction of the in-sample gain that carries
+    forward to the next interval (the prequential generalization efficiency; ~1/8
+    in the first enwik9 read).  Size-weighted (total transfer bits / total in-sample
+    bits), so it is unit-independent."""
+    din = sum(b.din_bits for b in bs)
+    return sum(b.g_bits for b in bs) / din if din else 0.0
+
+
 # ---------------------------------------------------------------------------
 # Input layer  (eval_online --json  ->  GkRun)
 # ---------------------------------------------------------------------------
@@ -144,6 +154,58 @@ class GkRun:
     modality: str
     source: str
     boundaries: List[Boundary]
+    params: dict            # defining run params (model/data/rank/…) for self-labelling
+
+
+def _extract_params(blob: dict) -> dict:
+    """The run's defining parameters, from the eval_online --json header (args +
+    config), so a summary or figure identifies itself without relying on the
+    filename."""
+    a, c = blob.get("args", {}), blob.get("config", {})
+
+    def _base(p):
+        return os.path.basename(str(p).rstrip("/\\")) if p else None
+    return {
+        "model": _base(a.get("model")),
+        "data": _base(a.get("data")),
+        "lora_r": c.get("lora_r", a.get("lora_r")),
+        "lora_alpha": c.get("lora_alpha", a.get("lora_alpha")),
+        "chunk_size": a.get("chunk_size"),
+        "lr": c.get("learning_rate", a.get("lr")),
+        "epochs": c.get("epochs_per_train", a.get("epochs_per_train")),
+        "train_interval": c.get("train_interval", a.get("train_interval")),
+        "max_bytes": a.get("max_bytes"),
+    }
+
+
+def _human_size(n) -> str:
+    try:
+        n = float(n)
+    except (TypeError, ValueError):
+        return "?"
+    return f"{n / 1e6:.2f}MB" if n >= 1e6 else f"{n / 1e3:.0f}KB"
+
+
+def _format_config(p: dict, n_boundaries: int) -> str:
+    """One-line, human-readable run signature (model · data · r · chunk · lr · …)."""
+    parts = [str(p[k]) for k in ("model", "data") if p.get(k)]
+    if p.get("lora_r") is not None:
+        r = f"r{p['lora_r']}"
+        if p.get("lora_alpha") is not None:
+            r += f"(α{p['lora_alpha']})"
+        parts.append(r)
+    if p.get("chunk_size") is not None:
+        parts.append(f"chunk {p['chunk_size']}")
+    if p.get("lr") is not None:
+        parts.append(f"lr {p['lr']:g}")
+    if p.get("epochs") is not None:
+        parts.append(f"ep {p['epochs']}")
+    if p.get("train_interval") is not None:
+        parts.append(f"ti {p['train_interval']}")
+    if p.get("max_bytes") is not None:
+        parts.append(_human_size(p["max_bytes"]))
+    parts.append(f"{n_boundaries} bnd")
+    return "  ·  ".join(parts)
 
 
 def _boundaries_from_records(records: List[dict]) -> List[Boundary]:
@@ -190,6 +252,7 @@ def load_gk_run(path: str) -> GkRun:
         modality=args.get("modality", "text"),
         source=path,
         boundaries=_boundaries_from_records(gk),
+        params=_extract_params(blob),
     )
 
 
@@ -201,6 +264,7 @@ def print_summary(run: GkRun, unit: str) -> None:
     bs = run.boundaries
     scale, label = UNIT_SCALE[unit], UNIT_LABEL[unit]
     print(f"\n{'=' * 72}\n  {run.tag}   ({run.modality}, {len(bs)} boundaries)\n{'=' * 72}")
+    print(f"  config: {_format_config(run.params, len(bs))}")
     print(f"  source: {run.source}")
     print(f"  harmful updates (g_k < 0): {harmful_fraction(bs) * 100:.1f}%"
           f"  ({sum(1 for b in bs if b.g_bits < 0)}/{len(bs)})")
@@ -209,6 +273,7 @@ def print_summary(run: GkRun, unit: str) -> None:
     print(f"  g_k   stream (size-weighted, = transferability)"
           f" = {stream_g(bs, unit) * scale:+.4f} {label}")
     print(f"  Δ_in  mean (per-boundary) = {mean_din(bs, unit) * scale:+.4f} {label}")
+    print(f"  transfer efficiency (g_k/Δ_in) = {transfer_efficiency(bs) * 100:.1f}%")
     # bits/byte is the cross-model headline regardless of the chosen display unit.
     if unit != "bpb":
         print(f"  g_k   stream Δbpb          = {stream_g(bs, 'bpb'):+.4f} bits/byte")
@@ -229,14 +294,24 @@ def plot_run(run: GkRun, out_path: str, unit: str) -> bool:
         return False
 
     bs = run.boundaries
-    scale, label = UNIT_SCALE[unit], UNIT_LABEL[unit]
+    scale, label, suffix = UNIT_SCALE[unit], UNIT_LABEL[unit], UNIT_SUFFIX[unit]
     x = [b.phase for b in bs]
     g = [b.g(unit) * scale for b in bs]
     din = [b.din(unit) * scale for b in bs]
     colors = ["#2ca02c" if v >= 0 else "#d62728" for v in g]
 
-    fig, (ax0, ax1) = plt.subplots(2, 1, figsize=(9, 7),
+    fig, (ax0, ax1) = plt.subplots(2, 1, figsize=(9.5, 7.8),
                                    gridspec_kw={"height_ratios": [2, 1]})
+
+    # Header: bold phenomenon + the run's full parameter signature + headline stats,
+    # so the figure identifies itself without the filename (see _format_config).
+    stats_line = (f"harmful {harmful_fraction(bs) * 100:.0f}%      "
+                  f"mean g_k {stream_g(bs, unit) * scale:+.3g}{suffix}      "
+                  f"transfer eff {transfer_efficiency(bs) * 100:.0f}%")
+    fig.suptitle(f"Prequential adaptation gain — {run.tag}", fontsize=13,
+                 fontweight="bold", y=0.995)
+    ax0.set_title(_format_config(run.params, len(bs)) + "\n" + stats_line,
+                  fontsize=8.5, color="0.30", pad=8)
 
     # top: per-boundary g_k (green helped / red hurt) with Δ_in overlaid
     ax0.bar(x, g, color=colors, width=0.8, zorder=2,
@@ -246,8 +321,6 @@ def plot_run(run: GkRun, out_path: str, unit: str) -> bool:
     ax0.axhline(0, color="0.4", lw=1.0)
     ax0.set_ylabel(f"g_k  [{label}]")
     ax0.set_xlabel("training boundary (phase)")
-    ax0.set_title(f"Prequential adaptation gain — {run.tag}"
-                  f"   |   harmful {harmful_fraction(bs) * 100:.0f}%")
     ax0.legend(loc="upper right", frameon=False)
     ax0.grid(alpha=0.25, lw=0.5)
 
@@ -263,9 +336,9 @@ def plot_run(run: GkRun, out_path: str, unit: str) -> bool:
                      ha="center", va="center")
     ax1.grid(alpha=0.25, lw=0.5)
 
-    fig.tight_layout()
+    fig.tight_layout(rect=[0, 0, 1, 0.96])       # leave room for the suptitle
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
-    fig.savefig(out_path, dpi=160)
+    fig.savefig(out_path, dpi=160, bbox_inches="tight")   # never clip long axis labels
     plt.close(fig)
     print(f"  wrote {out_path}")
     return True

@@ -35,7 +35,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from _common import CKPT_ROOT, DEFAULT_HF_MIRROR  # noqa: E402
+from _common import CKPT_ROOT, DEFAULT_HF_MIRROR, set_hf_transfer  # noqa: E402
 
 HF_CO = "https://huggingface.co"
 
@@ -137,6 +137,24 @@ def download_aria2(spec: dict, endpoint: str) -> None:
         _aria2_get(f"{endpoint}/{spec['repo']}/resolve/main/{f}", dest / f)
 
 
+def _attempt_ladder(endpoints: list[str], use_aria: bool, prefer_fast: bool):
+    """Ordered (endpoint, hf_transfer) attempts for a download that succeeds in any
+    environment.  Two orthogonal failure modes are each covered by a fallback:
+
+      * endpoint — hf.co blocked (China) vs the mirror flaky/redirecting (elsewhere):
+        try every endpoint;
+      * transfer — the hf_transfer Rust fast-path silently writes 0 bytes on some
+        networks, so after the preferred mode we always retry with it OFF, which
+        uses the pure-Python HTTP downloader that works wherever raw HTTP works.
+
+    aria2c has its own transport, so it ignores hf_transfer (fast=None).
+    """
+    if use_aria:
+        return [(ep, None) for ep in endpoints]
+    modes = ([True] if prefer_fast else []) + [False]     # preferred first, plain HTTP always last
+    return [(ep, fast) for ep in endpoints for fast in modes]
+
+
 def fetch_model(name: str, spec: dict, endpoints: list[str],
                 fast: bool = False, source: str = "hf") -> bool:
     if source == "modelscope":
@@ -167,20 +185,28 @@ def fetch_model(name: str, spec: dict, endpoints: list[str],
         fn = download_aria2
     else:
         fn = download_repo if spec["source"] == "hf_repo" else download_files
+
+    # Fall back across both endpoint and hf_transfer mode so a pull that dies on a
+    # blocked endpoint OR a silent hf_transfer 0-byte failure still lands on a
+    # working combination — no manual env tweaking needed (see _attempt_ladder).
+    prefer_fast = os.environ.get("HF_HUB_ENABLE_HF_TRANSFER", "1") != "0"
+    attempts = _attempt_ladder(endpoints, use_aria, prefer_fast)
     last = None
-    for ep in endpoints:
+    for ep, fast_mode in attempts:
+        if fast_mode is not None:
+            set_hf_transfer(fast_mode)
+        how = "" if fast_mode is None else (" [hf_transfer]" if fast_mode else " [plain HTTP]")
         try:
-            print(f"  [{name}] {spec['repo']} via {ep}"
+            print(f"  [{name}] {spec['repo']} via {ep}{how}"
                   f"{' (aria2c)' if use_aria else ''} -> checkpoints/{spec['dir']}")
             fn(spec, ep)
             print(f"  [{name}] done")
             return True
         except Exception as e:
             last = e
-            tail = endpoints[-1]
-            if ep != tail:
-                print(f"  [{name}] {ep} failed ({type(e).__name__}); falling back ...")
-    print(f"  [{name}] FAILED on all endpoints: {type(last).__name__}: {str(last)[:120]}")
+            if (ep, fast_mode) != attempts[-1]:
+                print(f"  [{name}] {ep}{how} failed ({type(e).__name__}); retrying ...")
+    print(f"  [{name}] FAILED on all endpoints/modes: {type(last).__name__}: {str(last)[:120]}")
     print(f"        China tip: pip install modelscope && "
           f"modelscope download --model {spec['repo']} --local_dir checkpoints/{spec['dir']}")
     if spec.get("note"):
