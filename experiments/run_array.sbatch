@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH -J olmc_sweep
+#SBATCH -J aolmc_sweep
 #SBATCH -p gpu
 #SBATCH -N 1
 #SBATCH --cpus-per-task=16
@@ -20,9 +20,9 @@
 set -euo pipefail
 
 # ---- cluster-specific: edit these once -----------------------------------
-PROJECT_DIR="/mnt/inaisfs/data/home/yibo_uw/git/Online_LMCompress"
+PROJECT_DIR="$HOME/git/adaptive-olmc"
 CONDA_SH="$HOME/miniconda3/etc/profile.d/conda.sh"
-CONDA_ENV="olmc"
+CONDA_ENV="aolmc"
 # --------------------------------------------------------------------------
 
 GROUP_DIR="${1:?usage: sbatch --array=0-N%K experiments/run_array.sbatch <group_dir>}"

@@ -1,0 +1,28 @@
+{
+  "group_name": "gk_enwik_dev",
+  "note": "DEV / pipeline smoke of gk_enwik: same g_k rank sweep on enwik9 but with a COMPLETE local checkpoint (Qwen2.5-0.5B) and a small chunk (512) so it fits a 4GB dev GPU and finishes in minutes. Purpose = exercise the full sweep->gk_curve pipeline and eyeball the g_k-vs-rank curves; it is NOT the headline number. For the real slice use grids/gk_enwik (Qwen3-0.6B / chunk 2048 / 2MB) on the GPU box — same four-step workflow. Lower max_bytes for a faster smoke; raise it for more boundaries. lora_alpha unset -> sweep sets alpha=2*r.",
+  "modality": "text",
+  "fixed": {
+    "model": "checkpoints/Qwen2.5-0.5B",
+    "max_bytes": 200000,
+    "chunk_size": 512,
+    "batch_chunks": 8,
+    "lr": 1e-04,
+    "epochs_per_train": 3,
+    "train_interval": 1,
+    "target_modules": "q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj",
+    "base_seed": 42,
+    "lora_dropout": 0.0,
+    "grad_clip": 1.0,
+    "weight_decay": 0.01,
+    "train_on_all": false,
+    "no_decompress": true,
+    "measure_gk": true
+  },
+  "grid": {
+    "data": [
+      "data/text/raw/enwik9"
+    ],
+    "lora_r": [16, 32, 64]
+  }
+}
