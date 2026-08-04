@@ -93,6 +93,15 @@ class OnlineCompressor(_ChunkedCompressor):
         orig_bytes = self.backend.raw_size_bytes(self.backend.from_chunks(chunks))
         return bits, tokens, orig_bytes
 
+    def _measure_interval_base(self, chunks: List[ChunkUnit]) -> float:
+        """Total interval bits under the FROZEN base model = L(I|S_0), by disabling
+        the LoRA adapter (equivalently S_0, since LoRA-B is zero at init).  The base
+        term of regret-vs-base = L(I_k|S_k) − L(I_k|S_0): >0 means the adapted model
+        is already worse than doing nothing = cumulative overfitting/drift, which g_k
+        (a local, adjacent-state quantity) cannot see."""
+        with self.backend.model.disable_adapter():
+            return sum(self.backend.measure_interval_bits(self.compressor, chunks))
+
     def _record_gk(
         self, phase: int, curr: List[ChunkUnit], nxt: List[ChunkUnit],
         train_chunks: List[ChunkUnit],
@@ -105,14 +114,17 @@ class OnlineCompressor(_ChunkedCompressor):
         (bits) plus each interval's token and original-byte counts, so the consumer
         (evaluation/gk_curve.py) can form the differences and normalise them any way
         it likes (Δbpb, relative %, bits/token) — the model run stays the sole
-        producer of ground-truth numbers.
+        producer of ground-truth numbers.  ``curr.bits_base`` = L(curr|S_0) is added
+        for the regret-vs-base signal (see _measure_interval_base).
 
-        The two pre-update reads see state S_k; ``_train`` advances it to S_{k+1}
-        and reseeds the global RNG at entry (utils.determinism.set_seed), so these
-        inference-only forwards cannot perturb the training trajectory — losslessness
-        is preserved and the archive is byte-identical to an un-instrumented run.
+        The pre-update reads (incl. the adapter-disabled base read) see state S_k;
+        ``_train`` advances it to S_{k+1} and reseeds the global RNG at entry
+        (utils.determinism.set_seed), so these inference-only forwards cannot perturb
+        the training trajectory — losslessness is preserved and the archive is
+        byte-identical to an un-instrumented run.
         """
         curr_pre, curr_tok, curr_by = self._measure_interval(curr)
+        curr_base = self._measure_interval_base(curr)      # L(curr|S_0), for regret-vs-base
         next_pre, next_tok, next_by = self._measure_interval(nxt)
         self._train(train_chunks, phase)
         curr_post, _, _ = self._measure_interval(curr)
@@ -120,7 +132,7 @@ class OnlineCompressor(_ChunkedCompressor):
         self.gk_records.append({
             "phase": phase,
             "curr": {"tokens": curr_tok, "bytes": curr_by,
-                     "bits_pre": curr_pre, "bits_post": curr_post},
+                     "bits_pre": curr_pre, "bits_post": curr_post, "bits_base": curr_base},
             "next": {"tokens": next_tok, "bytes": next_by,
                      "bits_pre": next_pre, "bits_post": next_post},
         })

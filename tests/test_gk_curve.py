@@ -23,10 +23,10 @@ def _records():
     signature (large Δ_in, negative g_k)."""
     return [
         {"phase": 0,
-         "curr": {"tokens": 100, "bytes": 400, "bits_pre": 800.0, "bits_post": 760.0},
+         "curr": {"tokens": 100, "bytes": 400, "bits_pre": 800.0, "bits_post": 760.0, "bits_base": 850.0},
          "next": {"tokens": 100, "bytes": 400, "bits_pre": 800.0, "bits_post": 720.0}},
         {"phase": 1,
-         "curr": {"tokens": 100, "bytes": 400, "bits_pre": 800.0, "bits_post": 600.0},
+         "curr": {"tokens": 100, "bytes": 400, "bits_pre": 800.0, "bits_post": 600.0, "bits_base": 700.0},
          "next": {"tokens": 100, "bytes": 400, "bits_pre": 800.0, "bits_post": 840.0}},
     ]
 
@@ -62,6 +62,32 @@ def test_aggregates():
     _close(gk.transfer_efficiency(bs), 40.0 / 240.0)
 
 
+def test_regret():
+    bs = gk._boundaries_from_records(_records())
+    b0, b1 = bs
+    # regret = online cost − base cost:  b0 800-850=-50 (ahead),  b1 800-700=+100 (behind)
+    _close(b0.regret_bits, -50.0)
+    _close(b1.regret_bits, +100.0)
+    assert gk.has_regret(bs)
+    _close(gk.worse_than_base_fraction(bs), 0.5)            # only b1 > 0
+    assert gk.cumulative_regret_bits(bs) == [-50.0, 50.0]   # ends behind static
+    _close(gk.stream_regret(bs, "rel"), 50.0 / 1550.0)      # Σregret / Σbase
+    _close(gk.stream_regret(bs, "bpb"), 50.0 / 800.0)
+    _close(b0.regret("bpb"), -50.0 / 400.0)
+
+
+def test_regret_absent_is_backward_compatible():
+    # records without a base term -> regret unavailable, everything else still works
+    recs = [{"phase": 0,
+             "curr": {"tokens": 10, "bytes": 40, "bits_pre": 80.0, "bits_post": 76.0},
+             "next": {"tokens": 10, "bytes": 40, "bits_pre": 80.0, "bits_post": 72.0}}]
+    bs = gk._boundaries_from_records(recs)
+    assert bs[0].curr_bits_base is None
+    assert bs[0].regret_bits is None
+    assert not gk.has_regret(bs)
+    _close(bs[0].g_bits, 8.0)          # g_k still fine
+
+
 def test_empty_and_zero_denominator():
     assert gk.harmful_fraction([]) == 0.0
     assert gk.mean_g([], "bpb") == 0.0
@@ -73,7 +99,8 @@ def test_empty_and_zero_denominator():
 
 
 def main() -> int:
-    tests = [test_per_boundary_g_and_din, test_aggregates, test_empty_and_zero_denominator]
+    tests = [test_per_boundary_g_and_din, test_aggregates, test_regret,
+             test_regret_absent_is_backward_compatible, test_empty_and_zero_denominator]
     for t in tests:
         t()
         print(f"  ok  {t.__name__}")

@@ -74,6 +74,7 @@ class Boundary:
     next_bytes: int
     next_bits_pre: float
     next_bits_post: float
+    curr_bits_base: Optional[float] = None   # L(curr|S_0); None if run predates --measure-gk regret
 
     @property
     def g_bits(self) -> float:
@@ -84,6 +85,26 @@ class Boundary:
     def din_bits(self) -> float:
         """Bits this update saved on the interval it trained on (Δ_in, in-sample)."""
         return self.curr_bits_pre - self.curr_bits_post
+
+    @property
+    def regret_bits(self) -> Optional[float]:
+        """Online cost − frozen-base cost on the interval it's coding (regret-vs-base).
+        >0 = the adapted model is WORSE than doing nothing = cumulative overfitting.
+        None if the run didn't record the base term."""
+        if self.curr_bits_base is None:
+            return None
+        return self.curr_bits_pre - self.curr_bits_base
+
+    def regret(self, unit: str) -> Optional[float]:
+        """regret_bits normalised the same way as g/din (fraction of base cost / Δbpb / b-tok)."""
+        r = self.regret_bits
+        if r is None:
+            return None
+        if unit == "bpb":
+            return r / self.curr_bytes if self.curr_bytes else 0.0
+        if unit == "bpt":
+            return r / self.curr_tokens if self.curr_tokens else 0.0
+        return r / self.curr_bits_base if self.curr_bits_base else 0.0
 
     def g(self, unit: str) -> float:
         """g_k normalised: fraction of pre-update cost ('rel'), Δbpb, or bits/token."""
@@ -142,6 +163,43 @@ def transfer_efficiency(bs: List[Boundary]) -> float:
     bits), so it is unit-independent."""
     din = sum(b.din_bits for b in bs)
     return sum(b.g_bits for b in bs) / din if din else 0.0
+
+
+# --- regret-vs-base (cumulative overfitting; needs the base term) -----------
+
+def has_regret(bs: List[Boundary]) -> bool:
+    """True iff every boundary recorded the base term (run used the newer instrument)."""
+    return bool(bs) and all(b.curr_bits_base is not None for b in bs)
+
+
+def worse_than_base_fraction(bs: List[Boundary]) -> float:
+    """Fraction of intervals where the adapted model is worse than the frozen base
+    (regret > 0) — the per-interval 'adaptation is hurting right now' rate."""
+    rs = [b.regret_bits for b in bs if b.regret_bits is not None]
+    return sum(1 for r in rs if r > 0) / len(rs) if rs else 0.0
+
+
+def cumulative_regret_bits(bs: List[Boundary]) -> List[float]:
+    """Running Σ regret_bits = online-total − base-total so far.  >0 = online has
+    fallen BEHIND static; the boundary where it crosses 0 is when adaptation turns net-harmful."""
+    out, acc = [], 0.0
+    for b in bs:
+        acc += b.regret_bits or 0.0
+        out.append(acc)
+    return out
+
+
+def stream_regret(bs: List[Boundary], unit: str) -> float:
+    """Stream-level regret: total (online − base) over total base cost (rel) / bytes / tokens.
+    In 'rel' this is ≈ −delta_pct (base ≈ static), a free cross-check against summary.csv."""
+    num = sum(b.regret_bits for b in bs if b.regret_bits is not None)
+    if unit == "bpb":
+        den = sum(b.curr_bytes for b in bs)
+    elif unit == "bpt":
+        den = sum(b.curr_tokens for b in bs)
+    else:
+        den = sum(b.curr_bits_base for b in bs if b.curr_bits_base is not None)
+    return num / den if den else 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -218,6 +276,7 @@ def _boundaries_from_records(records: List[dict]) -> List[Boundary]:
             curr_bits_pre=c["bits_pre"], curr_bits_post=c["bits_post"],
             next_tokens=n["tokens"], next_bytes=n["bytes"],
             next_bits_pre=n["bits_pre"], next_bits_post=n["bits_post"],
+            curr_bits_base=c.get("bits_base"),
         ))
     return out
 
@@ -277,6 +336,15 @@ def print_summary(run: GkRun, unit: str) -> None:
     # bits/byte is the cross-model headline regardless of the chosen display unit.
     if unit != "bpb":
         print(f"  g_k   stream Δbpb          = {stream_g(bs, 'bpb'):+.4f} bits/byte")
+    if has_regret(bs):
+        cum = cumulative_regret_bits(bs)
+        behind = cum[-1] > 0
+        print("  " + "-" * 68)
+        print(f"  regret>0 (online worse than base): {worse_than_base_fraction(bs) * 100:.1f}%")
+        print(f"  regret stream (online−base)      = {stream_regret(bs, unit) * scale:+.4f} {label}"
+              f"   (≈ −delta_pct)")
+        print(f"  cumulative regret (final)        = {cum[-1] / 8:+.0f} B  "
+              f"({'online BEHIND static — adaptation net-harmful' if behind else 'online ahead of static'})")
     print("=" * 72)
 
 
@@ -299,15 +367,23 @@ def plot_run(run: GkRun, out_path: str, unit: str) -> bool:
     g = [b.g(unit) * scale for b in bs]
     din = [b.din(unit) * scale for b in bs]
     colors = ["#2ca02c" if v >= 0 else "#d62728" for v in g]
+    regret_avail = has_regret(bs)
 
-    fig, (ax0, ax1) = plt.subplots(2, 1, figsize=(9.5, 7.8),
-                                   gridspec_kw={"height_ratios": [2, 1]})
+    # A regret (cumulative-drift) panel is inserted between g_k and the scatter when
+    # the run recorded the base term; older runs fall back to the original 2 panels.
+    n = 3 if regret_avail else 2
+    ratios = [2, 1, 1] if regret_avail else [2, 1]
+    fig, axes = plt.subplots(n, 1, figsize=(9.5, 9.6 if regret_avail else 7.8),
+                             gridspec_kw={"height_ratios": ratios})
+    ax0, ax_reg, ax1 = axes[0], (axes[1] if regret_avail else None), axes[-1]
 
     # Header: bold phenomenon + the run's full parameter signature + headline stats,
     # so the figure identifies itself without the filename (see _format_config).
     stats_line = (f"harmful {harmful_fraction(bs) * 100:.0f}%      "
                   f"mean g_k {stream_g(bs, unit) * scale:+.3g}{suffix}      "
                   f"transfer eff {transfer_efficiency(bs) * 100:.0f}%")
+    if regret_avail:
+        stats_line += f"      regret>0 {worse_than_base_fraction(bs) * 100:.0f}%"
     fig.suptitle(f"Prequential adaptation gain — {run.tag}", fontsize=13,
                  fontweight="bold", y=0.995)
     ax0.set_title(_format_config(run.params, len(bs)) + "\n" + stats_line,
@@ -320,9 +396,36 @@ def plot_run(run: GkRun, out_path: str, unit: str) -> bool:
              label="Δ_in (in-sample)")
     ax0.axhline(0, color="0.4", lw=1.0)
     ax0.set_ylabel(f"g_k  [{label}]")
-    ax0.set_xlabel("training boundary (phase)")
+    if not regret_avail:
+        ax0.set_xlabel("training boundary (phase)")
     ax0.legend(loc="upper right", frameon=False)
     ax0.grid(alpha=0.25, lw=0.5)
+
+    # middle: cumulative regret-vs-base (%) — the drift curve.  <0 online ahead of
+    # static (green), >0 online behind (red); the crossover = when adaptation turns
+    # net-harmful.  This is what g_k alone cannot show (see regret_bits).
+    if regret_avail:
+        cum, base_cum, acc, bacc = [], [], 0.0, 0.0
+        for b in bs:
+            acc += b.regret_bits or 0.0
+            bacc += b.curr_bits_base or 0.0
+            cum.append(acc)
+            base_cum.append(bacc)
+        cum_rel = [100.0 * c / bc if bc else 0.0 for c, bc in zip(cum, base_cum)]
+        ax_reg.plot(x, cum_rel, color="#555555", lw=1.5, zorder=3)
+        ax_reg.axhline(0, color="0.4", lw=1.0)
+        ax_reg.fill_between(x, 0, cum_rel, where=[v <= 0 for v in cum_rel],
+                            color="#2ca02c", alpha=0.15, interpolate=True)
+        ax_reg.fill_between(x, 0, cum_rel, where=[v > 0 for v in cum_rel],
+                            color="#d62728", alpha=0.15, interpolate=True)
+        cross = next((xi for xi, v in zip(x, cum_rel) if v > 0), None)
+        if cross is not None:
+            ax_reg.axvline(cross, color="#d62728", lw=1.0, ls="--")
+            ax_reg.annotate("online falls behind static", xy=(cross, 0), xytext=(4, 6),
+                            textcoords="offset points", fontsize=8, color="#d62728")
+        ax_reg.set_ylabel("cumulative regret\n[% vs base]  (>0 worse)")
+        ax_reg.set_xlabel("training boundary (phase)")
+        ax_reg.grid(alpha=0.25, lw=0.5)
 
     # bottom: Δ_in vs g_k — overfit signature is the bottom-right quadrant
     ax1.scatter(din, g, c=colors, s=18, zorder=2)

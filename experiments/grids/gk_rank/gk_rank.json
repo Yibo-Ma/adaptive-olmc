@@ -1,0 +1,30 @@
+{
+  "group_name": "gk_rank",
+  "note": "AXIS 1 of the collapse study (capacity). g_k/Δ_in/regret across LoRA rank on all 3 transferability levels (pile_of_law high, beancounter mid, enwik9 low). This is a RE-RUN of the earlier gk_enwik 3-dataset 10MB sweep now that eval_online records the regret-vs-base term (curr.bits_base) too — so gk_curve draws the cumulative-regret drift curve (enwik9 r128 crosses 0 = online worse than static, the −1.73% aggregate). Established: delta_pct is an inverted-U per dataset (optimal rank moves with transferability: enwik9 r16, beancounter r64, pile_of_law r32-64); the high-rank penalty is ordered by transferability (enwik9 goes NEGATIVE). Read per (dataset,rank): harmful%, mean g_k, transfer efficiency (g_k/Δ_in falls with rank), and now the regret drift. 10MB keeps the drift/crossover visible (a small-data artifact at 2MB). train_interval=1 -> per-chunk. Pairs with gk_lr + gk_epochs for the cross-knob COLLAPSE plot (g_k/outcome vs measured Δ_in, coloured by knob). lora_alpha unset -> alpha=2*r.",
+  "modality": "text",
+  "fixed": {
+    "model": "checkpoints/Qwen3-0.6B-Base",
+    "max_bytes": 10000000,
+    "chunk_size": 2048,
+    "batch_chunks": 8,
+    "lr": 1e-04,
+    "epochs_per_train": 3,
+    "train_interval": 1,
+    "target_modules": "q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj",
+    "base_seed": 42,
+    "lora_dropout": 0.0,
+    "grad_clip": 1.0,
+    "weight_decay": 0.01,
+    "train_on_all": false,
+    "no_decompress": true,
+    "measure_gk": true
+  },
+  "grid": {
+    "data": [
+      "data/text/raw/pile_of_law_eurlex",
+      "data/text/raw/enwik9",
+      "data/text/raw/beancounter"
+    ],
+    "lora_r": [16, 32, 64, 128]
+  }
+}

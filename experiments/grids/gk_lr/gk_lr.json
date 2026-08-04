@@ -1,0 +1,30 @@
+{
+  "group_name": "gk_lr",
+  "note": "AXIS 2 of the collapse study (optimisation step / lr). At a FIXED rank (r64, alpha auto=128), sweep lr across all 3 transferability levels. Answers: (a) does the optimal lr move with transferability the way the optimal rank did (predict enwik9 lower, pile_of_law higher)? (b) the OSOA lr smile — too-low lr under-adapts, too-high overfits/diverges (g_k turns negative + regret turns positive); the fixed-lr rank grid never showed the per-update overfit arm. (c) the rank<->lr COLLAPSE: overlay these runs' per-boundary (Δ_in, g_k) on the rank grid's — if lr-generated and rank-generated points trace ONE curve, adaptation strength is a single axis measured by Δ_in, independent of the knob. 2MB is enough: high-lr overfit shows within hundreds of steps and the collapse is a per-boundary (length-robust) relationship, so 2MB points overlay the 10MB rank points fine. lr spans 2 decades around the frozen 1e-4. Frozen config otherwise identical to gk_rank. measure_gk records g_k+regret. lora_r fixed in 'fixed' -> sweep still sets alpha=2*r.",
+  "modality": "text",
+  "fixed": {
+    "model": "checkpoints/Qwen3-0.6B-Base",
+    "max_bytes": 2000000,
+    "chunk_size": 2048,
+    "batch_chunks": 8,
+    "lora_r": 64,
+    "epochs_per_train": 3,
+    "train_interval": 1,
+    "target_modules": "q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj",
+    "base_seed": 42,
+    "lora_dropout": 0.0,
+    "grad_clip": 1.0,
+    "weight_decay": 0.01,
+    "train_on_all": false,
+    "no_decompress": true,
+    "measure_gk": true
+  },
+  "grid": {
+    "data": [
+      "data/text/raw/pile_of_law_eurlex",
+      "data/text/raw/enwik9",
+      "data/text/raw/beancounter"
+    ],
+    "lr": [1e-05, 3e-05, 1e-04, 3e-04, 1e-03]
+  }
+}

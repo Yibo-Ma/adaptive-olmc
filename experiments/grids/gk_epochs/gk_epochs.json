@@ -1,0 +1,26 @@
+{
+  "group_name": "gk_epochs",
+  "note": "AXIS 3 of the collapse study (epochs) — a THIN slice, not a full grid. On enwik9 only (the overfit-prone low-transfer stream), at fixed rank r64 + lr 1e-4, sweep epochs_per_train. Purpose: confirm the THIRD adaptation-strength knob also lands on the same (Δ_in -> g_k / regret) curve as rank and lr. epochs and lr are mechanistically near-redundant (both scale how hard each update fits the current interval), so a few points suffice to close the 'did you check epochs?' gap and complete the 'all three knobs collapse to one axis' claim — a full rank x lr x epochs 3D grid would add cost but no scientific information beyond this. Read via the cross-knob collapse plot alongside gk_rank + gk_lr. 2MB (per-boundary collapse is length-robust; more epochs overfits fast). Frozen config otherwise identical to gk_rank/gk_lr. lora_r fixed -> alpha=2*r.",
+  "modality": "text",
+  "fixed": {
+    "model": "checkpoints/Qwen3-0.6B-Base",
+    "data": "data/text/raw/enwik9",
+    "max_bytes": 2000000,
+    "chunk_size": 2048,
+    "batch_chunks": 8,
+    "lora_r": 64,
+    "lr": 1e-04,
+    "train_interval": 1,
+    "target_modules": "q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj",
+    "base_seed": 42,
+    "lora_dropout": 0.0,
+    "grad_clip": 1.0,
+    "weight_decay": 0.01,
+    "train_on_all": false,
+    "no_decompress": true,
+    "measure_gk": true
+  },
+  "grid": {
+    "epochs_per_train": [1, 3, 6, 9]
+  }
+}
