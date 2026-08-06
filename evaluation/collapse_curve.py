@@ -119,13 +119,21 @@ def by_dataset(points: List[RunPoint]) -> Dict[str, List[RunPoint]]:
     return out
 
 
+def is_diverged(pt: RunPoint, floor: float) -> bool:
+    """A run whose training BLEW UP (online >> static): delta_pct far below 0 — the
+    lr/epochs instability cliff, distinct from mild overfit.  Excluded from the
+    collapse curve (its Δ_in is contaminated too) and marked separately, so it does
+    not squash the y-axis of the operating regime."""
+    return pt.delta_pct is not None and pt.delta_pct < floor
+
+
 # ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 
-def print_summary(points: List[RunPoint], metric: str) -> None:
+def print_summary(points: List[RunPoint], metric: str, diverge_below: float) -> None:
     label, extract, _ = METRICS[metric]
-    print(f"\n{'=' * 74}\n  COLLAPSE — {label}   (x = mean Δ_in %)\n{'=' * 74}")
+    print(f"\n{'=' * 74}\n  COLLAPSE — {label}   (x = mean Δ_in %;  ✗ = diverged)\n{'=' * 74}")
     for ds, pts in by_dataset(points).items():
         print(f"\n  {ds}")
         for knob in ("rank", "lr", "epochs"):
@@ -133,7 +141,8 @@ def print_summary(points: List[RunPoint], metric: str) -> None:
             if not row:
                 continue
             cells = "  ".join(f"{KNOB_STYLE[knob]['param'][:4]}={p.knob_value:g}"
-                              f"(Δin={p.mean_din:.1f},y={extract(p):+.2f})"
+                              f"(Δin={p.mean_din:.1f},y={extract(p):+.2f}"
+                              f"{'✗' if is_diverged(p, diverge_below) else ''})"
                               for p in row if extract(p) is not None)
             print(f"    {knob:<7} {cells}")
     print("=" * 74)
@@ -143,7 +152,7 @@ def print_summary(points: List[RunPoint], metric: str) -> None:
 # Render (matplotlib optional)
 # ---------------------------------------------------------------------------
 
-def plot(points: List[RunPoint], out_path: str, metric: str) -> bool:
+def plot(points: List[RunPoint], out_path: str, metric: str, diverge_below: float) -> bool:
     try:
         import matplotlib
         matplotlib.use("Agg")
@@ -155,33 +164,54 @@ def plot(points: List[RunPoint], out_path: str, metric: str) -> bool:
     label, extract, zero_line = METRICS[metric]
     groups = by_dataset(points)
     datasets = list(groups)
-    fig, axes = plt.subplots(1, len(datasets), figsize=(5.2 * len(datasets), 4.6),
+    fig, axes = plt.subplots(1, len(datasets), figsize=(5.2 * len(datasets), 4.8),
                              squeeze=False)
     for ax, ds in zip(axes[0], datasets):
+        ok_ys, div_pts = [], []                          # operating points / diverged (knob, colour)
         for knob in ("rank", "lr", "epochs"):
-            row = sorted((p for p in groups[ds] if p.knob == knob and extract(p) is not None),
-                         key=lambda p: p.mean_din)
-            if not row:
+            kp = [p for p in groups[ds] if p.knob == knob and extract(p) is not None]
+            if not kp:
                 continue
             st = KNOB_STYLE[knob]
-            xs = [p.mean_din for p in row]
-            ys = [extract(p) for p in row]
-            ax.plot(xs, ys, color=st["color"], marker=st["marker"], ms=6, lw=1.4,
-                    label=knob, zorder=3)
-            for p in row:                                # annotate each point's knob value
-                ax.annotate(f"{p.knob_value:g}", (p.mean_din, extract(p)),
-                            textcoords="offset points", xytext=(4, 4), fontsize=7,
-                            color=st["color"])
-        if zero_line:
+            ok = sorted((p for p in kp if not is_diverged(p, diverge_below)),
+                        key=lambda p: p.mean_din)
+            if ok:
+                ax.plot([p.mean_din for p in ok], [extract(p) for p in ok],
+                        color=st["color"], marker=st["marker"], ms=6, lw=1.4,
+                        label=knob, zorder=3)
+                for p in ok:                             # annotate each point's knob value
+                    ax.annotate(f"{p.knob_value:g}", (p.mean_din, extract(p)),
+                                textcoords="offset points", xytext=(4, 4), fontsize=7,
+                                color=st["color"])
+                ok_ys += [extract(p) for p in ok]
+            div_pts += [(p, st["color"]) for p in kp if is_diverged(p, diverge_below)]
+
+        # robust y-range from the OPERATING points only (diverged ones would squash it)
+        if ok_ys:
+            lo, hi = min(ok_ys), max(ok_ys)
+            pad = 0.12 * (hi - lo) + 0.5
+            ymin, ymax = lo - pad, hi + pad
+        else:
+            ymin, ymax = -1.0, 1.0
+        ax.set_ylim(ymin, ymax)
+        if zero_line and ymin < 0 < ymax:
             ax.axhline(0, color="0.5", lw=1.0, ls=":")
+        # diverged runs: clamp into view, mark with ✗ + real value (excluded from the curve)
+        for p, col in div_pts:
+            yc = min(max(extract(p), ymin), ymax)
+            ax.scatter([p.mean_din], [yc], marker="x", s=55, color=col, zorder=5, clip_on=False)
+            ax.annotate(f"{p.knob_value:g}✗{extract(p):.0f}", (p.mean_din, yc),
+                        textcoords="offset points", xytext=(3, -1), fontsize=6.5,
+                        color="#d62728", ha="left", va="top")
+
         ax.set_title(ds, fontsize=10)
         ax.set_xlabel("mean Δ_in  [%]   (adaptation strength →)")
         ax.grid(alpha=0.25, lw=0.5)
-        ax.legend(frameon=False, fontsize=8)
+        ax.legend(frameon=False, fontsize=8, loc="best")
     axes[0][0].set_ylabel(label)
-    fig.suptitle("Cross-knob collapse: rank / lr / epochs vs adaptation strength (Δ_in)",
+    fig.suptitle("Cross-knob collapse: rank / lr / epochs vs Δ_in   (× = diverged, off curve)",
                  fontsize=12, fontweight="bold")
-    fig.tight_layout(rect=[0, 0, 1, 0.94])
+    fig.tight_layout(rect=[0, 0, 1, 0.93])
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
     fig.savefig(out_path, dpi=160, bbox_inches="tight")
     plt.close(fig)
@@ -204,6 +234,9 @@ def main() -> int:
     p.add_argument("--epochs", help="sweep group dir for the epochs axis (optional)")
     p.add_argument("--metric", choices=list(METRICS), default="delta",
                    help="y-axis outcome (default: delta = online-vs-static gain)")
+    p.add_argument("--diverge-below", type=float, default=-40.0,
+                   help="delta_pct floor below which a run counts as DIVERGED (training blew "
+                        "up, not mild overfit): excluded from the curve, marked with ✗ (default -40)")
     p.add_argument("--out", default="collapse.png", help="output PNG path")
     p.add_argument("--no-plot", action="store_true")
     args = p.parse_args()
@@ -221,9 +254,9 @@ def main() -> int:
     if len(knobs) < 2:
         print("  [warn] only one knob present — the collapse needs >=2 knobs to compare.")
 
-    print_summary(points, args.metric)
+    print_summary(points, args.metric, args.diverge_below)
     if not args.no_plot:
-        plot(points, args.out, args.metric)
+        plot(points, args.out, args.metric, args.diverge_below)
     return 0
 
 
