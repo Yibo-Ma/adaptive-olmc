@@ -1,39 +1,40 @@
 #!/usr/bin/env python3
 """Build a heterogeneous (multi-domain) text stream for the overfit-vs-static test.
 
-Concatenates a contiguous byte-prefix of each of several *normalized* datasets into a
-single ``part-00000.txt``, so the stream contains hard domain switches.  This is the
-stream used to check whether vanilla online adaptation over-fits one domain and then
-loses to Static across the switch (cumulative regret going positive).
+Concatenates a contiguous byte-prefix of each of several *raw* datasets into a single
+``part-00000.txt``, so the stream contains hard domain switches.  This is the stream
+used to check whether vanilla online adaptation over-fits one domain and then loses to
+Static across the switch (cumulative regret going positive).
 
-It reads from the same layout ``eval_online.py`` consumes and writes into it, so the
-result is a drop-in dataset directory:
+It reads from and writes into ``data/text/raw/`` (the base path the current pipeline
+uses), so the result is a drop-in dataset directory ``eval_online.py`` consumes:
 
-    data/text/normalized/<tag>/<key>/part-*.txt     (sources, one per domain)
-        -> data/text/normalized/<tag>/<out>/        part-00000.txt
-                                                     manifest.jsonl      (shard sizes)
-                                                     mix_manifest.json   (provenance)
+    data/text/raw/<key>/part-*.txt          (sources, one per domain)
+        -> data/text/raw/<out>/             part-00000.txt
+                                            manifest.jsonl      (shard sizes)
+                                            mix_manifest.json   (provenance)
 
 Each block is a *prefix* of its source (coherent in-domain, giving a clean switch at
 each boundary), cut on a UTF-8 char boundary and backed off to the nearest newline.
 The per-block byte ranges are recorded in ``mix_manifest.json`` so the switch offsets
 can be mapped onto eval_online's chunk / regret curve.
 
+Raw text is *not* tokenizer-normalized, so a byte-exact round-trip is not guaranteed
+(that needs ``data/text/normalized/``); run the compress-only rate test with
+``--no-decompress`` (as the rank/lr/epoch sweeps do).
+
 Run from the repo root:
 
-    # default: enwik9 + edgar_corpus + pile_of_law_eurlex (10MB, equal thirds)
+    # default: the intended 3 domains (present in raw/ on the cluster)
     python scripts/build_mixed_stream.py
 
-    # the intended 3 domains once beancounter is present (e.g. on the cluster):
-    python scripts/build_mixed_stream.py --datasets enwik9,beancounter,pile_of_law_eurlex
+    # explicit / local subset / custom size-weights-name:
+    python scripts/build_mixed_stream.py --datasets enwik9,medal,codesearchnet
+    python scripts/build_mixed_stream.py --datasets enwik9,beancounter,pile_of_law_eurlex \
+        --total-bytes 10MB --weights 1,1,1 --out mix_enwik_bean_law
 
-    # custom size / weights / output name:
-    python scripts/build_mixed_stream.py --datasets enwik9,edgar_corpus,pile_of_law_eurlex \
-        --total-bytes 10MB --weights 1,1,1 --out mix_enwik_edgar_law
-
-NOTE: ``beancounter`` is not synced to this dev machine (only on the cluster); the
-default substitutes ``edgar_corpus`` (SEC filings, the closest financial-domain
-analog).  Swap it with ``--datasets`` when the real beancounter shard is available.
+NOTE: this dev machine only syncs a subset of ``data/text/raw/`` (no beancounter /
+pile_of_law_eurlex locally); the script fail-fasts and lists what is available.
 """
 from __future__ import annotations
 
@@ -46,8 +47,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _common import DATA_ROOT, human_bytes, parse_size  # noqa: E402
 
-NORMALIZED = DATA_ROOT / "text" / "normalized"
-DEFAULT_DATASETS = "enwik9,edgar_corpus,pile_of_law_eurlex"
+RAW = DATA_ROOT / "text" / "raw"
+DEFAULT_DATASETS = "enwik9,beancounter,pile_of_law_eurlex"
 DEFAULT_TOTAL = 10_000_000
 # How far back to look for a newline when trimming a block to a clean document edge.
 NEWLINE_WINDOW = 8192
@@ -58,30 +59,21 @@ def _short(key: str) -> str:
     return key.split("_", 1)[0]
 
 
-def _source_dir(tag: str, key: str):
-    return NORMALIZED / tag / key
-
-
-def _available(tag: str):
-    """Normalized datasets that actually carry data under this tokenizer tag."""
-    root = NORMALIZED / tag
-    if not root.is_dir():
+def _available():
+    """Raw datasets that actually carry part-*.txt data."""
+    if not RAW.is_dir():
         return []
-    out = []
-    for d in sorted(root.iterdir()):
-        if d.is_dir() and glob.glob(str(d / "part-*.txt")):
-            out.append(d.name)
-    return out
+    return [d.name for d in sorted(RAW.iterdir())
+            if d.is_dir() and glob.glob(str(d / "part-*.txt"))]
 
 
-def _load_source_bytes(tag: str, key: str) -> bytes:
+def _load_source_bytes(key: str) -> bytes:
     """Concatenate a source's part-*.txt shards in order (matches eval_online)."""
-    d = _source_dir(tag, key)
-    parts = sorted(glob.glob(str(d / "part-*.txt")))
+    parts = sorted(glob.glob(str(RAW / key / "part-*.txt")))
     if not parts:
-        avail = ", ".join(_available(tag)) or "(none)"
+        avail = ", ".join(_available()) or "(none)"
         sys.exit(f"[build_mixed_stream] ERROR: no part-*.txt for '{key}' under "
-                 f"{d}\n                   available under tag '{tag}': {avail}")
+                 f"{RAW / key}\n                   available under data/text/raw: {avail}")
     raw = b""
     for p in parts:
         with open(p, "rb") as f:
@@ -122,10 +114,8 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--datasets", default=DEFAULT_DATASETS,
-                    help="comma-separated normalized dataset keys, in stream order "
+                    help="comma-separated raw dataset keys, in stream order "
                          f"(default: {DEFAULT_DATASETS})")
-    ap.add_argument("--tokenizer", default="qwen3",
-                    help="tokenizer tag under data/text/normalized/ (default: qwen3)")
     ap.add_argument("--total-bytes", default=str(DEFAULT_TOTAL), metavar="N",
                     help="total stream size, accepts 10MB / 10000000 (default: 10MB)")
     ap.add_argument("--weights", default=None,
@@ -136,7 +126,6 @@ def main() -> None:
                     help="overwrite an existing non-empty output dir")
     args = ap.parse_args()
 
-    tag = args.tokenizer
     keys = [k.strip() for k in args.datasets.split(",") if k.strip()]
     if len(keys) < 2:
         sys.exit("[build_mixed_stream] ERROR: need >= 2 datasets for a mixed stream")
@@ -147,17 +136,17 @@ def main() -> None:
     targets = _block_targets(total, len(keys), weights)
 
     out_key = args.out or ("mix_" + "_".join(_short(k) for k in keys))
-    out_dir = NORMALIZED / tag / out_key
+    out_dir = RAW / out_key
     if out_dir.is_dir() and glob.glob(str(out_dir / "part-*.txt")) and not args.force:
         sys.exit(f"[build_mixed_stream] ERROR: {out_dir} already has data; pass --force")
 
-    print(f"[build_mixed_stream] tokenizer={tag}  target={human_bytes(total)}  "
-          f"out=data/text/normalized/{tag}/{out_key}\n")
+    print(f"[build_mixed_stream] target={human_bytes(total)}  "
+          f"out=data/text/raw/{out_key}\n")
 
     # --- assemble blocks (fail-fast on any missing / too-small source) ---
     blocks, buf, offset = [], bytearray(), 0
     for key, want in zip(keys, targets):
-        raw = _load_source_bytes(tag, key)
+        raw = _load_source_bytes(key)
         if len(raw) < want:
             sys.exit(f"[build_mixed_stream] ERROR: '{key}' has {human_bytes(len(raw))}"
                      f" < requested {human_bytes(want)} for its block")
@@ -169,14 +158,14 @@ def main() -> None:
         offset += len(chunk)
     data = bytes(buf)
 
-    # --- verify before writing (round-trip-safe, byte-exact provenance) ---
+    # --- verify before writing (byte-exact provenance) ---
     try:
         data.decode("utf-8")
     except UnicodeDecodeError as e:
         sys.exit(f"[build_mixed_stream] ERROR: assembled stream is not valid UTF-8: {e}")
     assert len(data) == sum(b["bytes"] for b in blocks), "block byte accounting mismatch"
     for b in blocks:
-        src = _load_source_bytes(tag, b["dataset"])[: b["bytes"]]
+        src = _load_source_bytes(b["dataset"])[: b["bytes"]]
         assert data[b["byte_start"]:b["byte_end"]] == src, \
             f"block '{b['dataset']}' not a byte-exact prefix of its source"
 
@@ -187,7 +176,8 @@ def main() -> None:
     (out_dir / "part-00000.txt").write_bytes(data)
     with open(out_dir / "manifest.jsonl", "w", encoding="utf-8") as f:
         f.write(json.dumps({"shard": 0, "bytes": len(data)}) + "\n")
-    mix_manifest = dict(out_key=out_key, tokenizer_tag=tag, created_by=__file__.replace("\\", "/").split("adaptive-olmc/")[-1],
+    mix_manifest = dict(out_key=out_key, source_root="data/text/raw",
+                        created_by="scripts/build_mixed_stream.py",
                         total_bytes=len(data), target_total_bytes=total,
                         datasets=keys, weights=weights or [1.0] * len(keys),
                         blocks=blocks)
