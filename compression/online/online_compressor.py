@@ -11,6 +11,8 @@ The partial trailing interval is coded but not trained (mirrored on both ends).
 """
 from __future__ import annotations
 
+import copy
+import math
 from dataclasses import asdict
 from typing import Any, Dict, List, Optional
 
@@ -29,6 +31,7 @@ class OnlineCompressor(_ChunkedCompressor):
     def __init__(
         self, backend: OnlineBackend, device: torch.device, cfg: OnlineLearningConfig,
         shuffle_seed: Optional[int] = None, measure_gk: bool = False,
+        branch_lrs: Optional[List[float]] = None, branch_ref_lr: Optional[float] = None,
     ) -> None:
         super().__init__(backend, device, shuffle_seed=shuffle_seed)
         self.cfg = cfg
@@ -38,6 +41,14 @@ class OnlineCompressor(_ChunkedCompressor):
         # path byte-identical; a list collects one prequential record per training
         # boundary.  Encoder-side only — decoding never needs it.
         self.gk_records: Optional[List[Dict]] = [] if measure_gk else None
+        # Same-state branching instrument (see _record_branch): at each boundary,
+        # score the next interval under several candidate learning rates from the
+        # identical parent state, then advance the MAIN trajectory by branch_ref_lr.
+        # None disables it (coding path byte-identical); mutually exclusive with gk.
+        self.branch_lrs: Optional[List[float]] = branch_lrs
+        self.branch_ref_lr: float = (
+            branch_ref_lr if branch_ref_lr is not None else cfg.learning_rate)
+        self.branch_records: Optional[List[Dict]] = [] if branch_lrs else None
 
     def _settings(self) -> Dict:
         return asdict(self.cfg)
@@ -74,10 +85,14 @@ class OnlineCompressor(_ChunkedCompressor):
                 continue
             train_chunks = group if self.cfg.train_on_recent_only else seen
             nxt = intervals[k + 1][0] if k + 1 < len(intervals) else None
-            if self.gk_records is None or nxt is None:
-                self._train(train_chunks, phase)
-            else:
+            if nxt is None:
+                self._train(train_chunks, phase)          # last full interval: advance only
+            elif self.branch_records is not None:
+                self._record_branch(phase, group, nxt, train_chunks)
+            elif self.gk_records is not None:
                 self._record_gk(phase, group, nxt, train_chunks)
+            else:
+                self._train(train_chunks, phase)
             phase += 1
 
         return self._assemble_archive(self.ROLE, all_cds, total_ob, framing)
@@ -135,6 +150,98 @@ class OnlineCompressor(_ChunkedCompressor):
                      "bits_pre": curr_pre, "bits_post": curr_post, "bits_base": curr_base},
             "next": {"tokens": next_tok, "bytes": next_by,
                      "bits_pre": next_pre, "bits_post": next_post},
+        })
+
+    # ------------------------------------------------------------------
+    # Same-state branching instrument (encoder-side; off unless branch_lrs set)
+    # ------------------------------------------------------------------
+
+    def _snapshot_state(self):
+        """Clone the branchable state at the current boundary: LoRA (trainable)
+        params + full optimizer (Adam moment) state.  Restoring returns the model
+        and optimizer bit-exactly to S_k, so every candidate branches from an
+        identical parent.  The global RNG is deliberately NOT snapshotted:
+        ``train_phase`` reseeds deterministically per phase at entry, so a
+        candidate's (or the advance's) training is independent of whatever RNG the
+        sibling branches consumed — the same property that makes _record_gk safe."""
+        params = {n: p.detach().clone()
+                  for n, p in self.backend.model.named_parameters() if p.requires_grad}
+        opt = copy.deepcopy(self.optimizer.state_dict())
+        return params, opt
+
+    def _restore_state(self, snapshot) -> None:
+        params, opt = snapshot
+        with torch.no_grad():
+            for n, p in self.backend.model.named_parameters():
+                if p.requires_grad:
+                    p.copy_(params[n])
+        self.optimizer.load_state_dict(opt)
+
+    def _set_lr(self, lr: float) -> None:
+        for g in self.optimizer.param_groups:
+            g["lr"] = lr
+
+    def _record_branch(
+        self, phase: int, curr: List[ChunkUnit], nxt: List[ChunkUnit],
+        train_chunks: List[ChunkUnit],
+    ) -> None:
+        """Same-state one-step branching (the dynamic-strength probe).
+
+        From the parent state S_k, apply each candidate learning rate, score the
+        NEXT interval (and the just-coded one) under the resulting state, then
+        discard every branch and advance the MAIN trajectory by ``branch_ref_lr``.
+        Every candidate is restored to the identical parent (params + optimizer
+        moments) and trains under the identical per-phase seed (train_phase reseeds
+        at entry), so the ONLY difference between candidates is the learning rate —
+        a clean counterfactual, exactly what "is the best strength different per
+        interval?" needs.
+
+        ``lr == 0`` is the *skip* (no-update) candidate: scored at S_k with no
+        training, so its bits ARE L(·|S_k) — the hold baseline the consumer forms
+        g_k and Δ_in against.  Only raw code lengths (bits, the measure_interval_bits
+        NLL twin) plus token/byte counts are stored; evaluation/branch_curve.py forms
+        best-action, the local oracle, the switch stats and near-ties.
+
+        Determinism: the advance restores S_k and trains at ``branch_ref_lr`` exactly
+        as a non-branching fixed-lr run would, so the coded trajectory — and thus the
+        archive — is byte-identical to a plain run at that lr (the branches only read)."""
+        curr_tok = sum(len(c.token_ids) for c in curr)
+        curr_by = self.backend.raw_size_bytes(self.backend.from_chunks(curr))
+        next_tok = sum(len(c.token_ids) for c in nxt)
+        next_by = self.backend.raw_size_bytes(self.backend.from_chunks(nxt))
+
+        # Frozen-base (Static) reference on both intervals = L(·|S_0), via disable_adapter.
+        curr_base = self._measure_interval_base(curr)
+        next_base = self._measure_interval_base(nxt)
+
+        snapshot = self._snapshot_state()
+        cands: List[Dict] = []
+        for lr in self.branch_lrs:
+            self._restore_state(snapshot)        # every candidate branches from S_k
+            if lr == 0.0:                        # skip = no update
+                curr_bits = self._measure_interval(curr)[0]
+                next_bits = self._measure_interval(nxt)[0]
+            else:
+                self._set_lr(lr)
+                self._train(train_chunks, phase)
+                curr_bits = self._measure_interval(curr)[0]
+                next_bits = self._measure_interval(nxt)[0]
+            cands.append({
+                "lr": lr, "curr_bits": curr_bits, "next_bits": next_bits,
+                "nonfinite": not (math.isfinite(curr_bits) and math.isfinite(next_bits)),
+            })
+
+        # Advance the main trajectory by the reference lr from the identical parent.
+        self._restore_state(snapshot)
+        self._set_lr(self.branch_ref_lr)
+        self._train(train_chunks, phase)
+
+        self.branch_records.append({
+            "phase": phase,
+            "ref_lr": self.branch_ref_lr,
+            "curr": {"tokens": curr_tok, "bytes": curr_by, "bits_base": curr_base},
+            "next": {"tokens": next_tok, "bytes": next_by, "bits_base": next_base},
+            "candidates": cands,
         })
 
     def decompress(self, archive_bytes: bytes) -> Any:

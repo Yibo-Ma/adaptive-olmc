@@ -222,13 +222,17 @@ def _run_mode(mode: str, args, device, cfg: OnlineLearningConfig):
 
     verify = not args.no_decompress
 
+    branch_lrs = ([float(x) for x in args.branch_lrs.split(",")]
+                  if args.branch_lrs else None)
+
     def make_compressor():
         backend = _build_backend(args.modality, args.model, device, args)
         if mode == "static":
             return StaticCompressor(backend, device, batch_chunks=args.batch_chunks,
                                     shuffle_seed=args.shuffle_seed)
         return OnlineCompressor(backend, device, cfg, shuffle_seed=args.shuffle_seed,
-                                measure_gk=args.measure_gk)
+                                measure_gk=args.measure_gk,
+                                branch_lrs=branch_lrs, branch_ref_lr=args.branch_ref_lr)
 
     comp = make_compressor()
     comp.setup()
@@ -239,6 +243,8 @@ def _run_mode(mode: str, args, device, cfg: OnlineLearningConfig):
     # g_k / Δ_in records (online + --measure-gk only; None otherwise). Grab before
     # the model is freed below so gk_curve.py can plot them from --json alone.
     gk_records = getattr(comp, "gk_records", None)
+    # Same-state branching records (online + --branch-lrs only; None otherwise).
+    branch_records = getattr(comp, "branch_records", None)
 
     comp_bytes = len(archive)
     ratio = orig_bytes / max(comp_bytes, 1)
@@ -281,7 +287,8 @@ def _run_mode(mode: str, args, device, cfg: OnlineLearningConfig):
 
     return dict(mode=mode, orig=orig_bytes, comp=comp_bytes,
                 ratio=ratio, bpb=bpb, bpsp=bpsp, comp_s=comp_s, decomp_s=decomp_s,
-                chunk_lengths=chunk_lengths, chunk_bits=chunk_bits, gk=gk_records)
+                chunk_lengths=chunk_lengths, chunk_bits=chunk_bits, gk=gk_records,
+                branch=branch_records)
 
 
 def _print_comparison(results, modality: str):
@@ -353,6 +360,17 @@ def _build_parser():
                    help="online only: record the prequential g_k and Δ_in at every training "
                         "boundary into --json (two extra no-grad forwards per boundary; the "
                         "coding path stays byte-identical). Plot with evaluation/gk_curve.py")
+    p.add_argument("--branch-lrs", default=None, metavar="LRS",
+                   help="online only: same-state branching probe. Comma-separated candidate "
+                        "learning rates scored from the identical parent at every boundary "
+                        "(e.g. '0,3e-5,1e-4,3e-4'; 0 = skip/no-update). The main trajectory "
+                        "advances by --branch-ref-lr (byte-identical to a plain run at that lr). "
+                        "Records to --json results[online].branch; analyse with "
+                        "evaluation/branch_curve.py. Mutually exclusive with --measure-gk.")
+    p.add_argument("--branch-ref-lr", type=float, default=None,
+                   help="online only: learning rate the main trajectory advances by between "
+                        "boundaries under --branch-lrs — the fixed reference policy the branches "
+                        "are compared against (default: --lr)")
     p.add_argument("--target-modules", default=None,
                    help="comma-separated LoRA target modules (default: per-modality)")
     p.add_argument("--config", default=None, metavar="PATH",
@@ -453,6 +471,10 @@ def main():
     if args.data is None:
         args.data = _resolve_default_data(args.modality, args.model)
     args.model = os.path.normpath(args.model)
+
+    if args.branch_lrs and args.measure_gk:
+        parser.error("--branch-lrs and --measure-gk are mutually exclusive "
+                     "(both are per-boundary online probes); pick one.")
 
     ensure_deterministic()
     device = torch.device(args.device)

@@ -1,0 +1,29 @@
+{
+  "group_name": "branch_lr",
+  "note": "Dynamic Online Compression V1: same-state one-step branching over learning rate. At every boundary, from the identical parent S_k, score the next interval under candidate lrs 0(skip)/3e-5/3e-4 plus the reference 1e-4; the main trajectory advances by the reference lr (byte-identical to a plain lr=1e-4 run - determinism preserved). Fixed r32/alpha64/ep3/ti1 per the V1 spec; only lr varies across candidates. Compress-only (no_decompress). Answers: (1) does the best strength differ per interval? (2) local-oracle headroom over the best fixed lr, plus the switch structure that says whether that oracle is trackable. Analyse with evaluation/branch_curve.py (mirrors gk_curve). Cost ~4x a plain run (3 trained candidates + 1 advance per boundary). branch_lrs/branch_ref_lr are mutually exclusive with measure_gk. Add more data entries to sweep the domain orderings.",
+  "modality": "text",
+  "fixed": {
+    "model": "checkpoints/Qwen3-0.6B-Base",
+    "max_bytes": 10000000,
+    "chunk_size": 2048,
+    "batch_chunks": 8,
+    "lora_r": 32,
+    "lr": 1e-04,
+    "epochs_per_train": 3,
+    "train_interval": 1,
+    "target_modules": "q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj",
+    "base_seed": 42,
+    "lora_dropout": 0.0,
+    "grad_clip": 1.0,
+    "weight_decay": 0.01,
+    "train_on_all": false,
+    "no_decompress": true,
+    "branch_lrs": "0,3e-5,1e-4,3e-4",
+    "branch_ref_lr": 1e-04
+  },
+  "grid": {
+    "data": [
+      "data/text/raw/mix_enwik9_beancounter_pile"
+    ]
+  }
+}

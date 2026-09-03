@@ -1,0 +1,28 @@
+{
+  "group_name": "gk_mixed",
+  "note": "Overfit-vs-static on a HETEROGENEOUS stream (enwik9 -> beancounter -> pile_of_law_eurlex, 10MB, 2 hard domain switches at ~33%/67%; built by scripts/build_mixed_stream.py into data/text/raw/mix_enwik9_beancounter_pile). Same fixed config as gk_rank so the mixed stream slots onto the same collapse axis; sweep lora_r to see whether online adaptation over-fits a domain and gets overtaken by static across a switch (cumulative regret crossing 0). measure_gk on -> gk_curve draws the regret drift. no_decompress: raw text is not tokenizer-normalized so round-trip is not guaranteed; this is a compress-only rate run. lora_alpha unset -> alpha=2*r.",
+  "modality": "text",
+  "fixed": {
+    "model": "checkpoints/Qwen3-0.6B-Base",
+    "max_bytes": 10000000,
+    "chunk_size": 2048,
+    "batch_chunks": 8,
+    "lr": 1e-04,
+    "epochs_per_train": 3,
+    "train_interval": 1,
+    "target_modules": "q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj",
+    "base_seed": 42,
+    "lora_dropout": 0.0,
+    "grad_clip": 1.0,
+    "weight_decay": 0.01,
+    "train_on_all": false,
+    "no_decompress": true,
+    "measure_gk": true
+  },
+  "grid": {
+    "data": [
+      "data/text/raw/mix_enwik9_beancounter_pile"
+    ],
+    "lora_r": [16, 32, 64, 128]
+  }
+}
