@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional
 
 import torch
 
+from compression.online.adjacency_plan import plan_adjacency
 from compression.online.backends.base import ChunkUnit, OnlineBackend
 from compression.online.base import _ChunkedCompressor
 from compression.online.config import OnlineLearningConfig
@@ -32,6 +33,7 @@ class OnlineCompressor(_ChunkedCompressor):
         self, backend: OnlineBackend, device: torch.device, cfg: OnlineLearningConfig,
         shuffle_seed: Optional[int] = None, measure_gk: bool = False,
         branch_lrs: Optional[List[float]] = None, branch_ref_lr: Optional[float] = None,
+        adjacency_probe: Optional[Dict] = None, domain_blocks: Optional[List[Dict]] = None,
     ) -> None:
         super().__init__(backend, device, shuffle_seed=shuffle_seed)
         self.cfg = cfg
@@ -49,6 +51,14 @@ class OnlineCompressor(_ChunkedCompressor):
         self.branch_ref_lr: float = (
             branch_ref_lr if branch_ref_lr is not None else cfg.learning_rate)
         self.branch_records: Optional[List[Dict]] = [] if branch_lrs else None
+        # V1-A adjacency probe (see _record_adjacency): at sampled boundaries score the
+        # true future window and matched non-adjacent controls under the pre/post-update
+        # model.  The main trajectory is plain OSOA (byte-identical); only extra frozen
+        # forwards are added.  dict{h_max,k_controls,n_target,seed} enables it; None off.
+        self.adjacency_probe: Optional[Dict] = adjacency_probe
+        self.domain_blocks: Optional[List[Dict]] = domain_blocks
+        self.adjacency_records: Optional[List[Dict]] = [] if adjacency_probe else None
+        self._adj_plan: Dict[int, List[int]] = {}
 
     def _settings(self) -> Dict:
         return asdict(self.cfg)
@@ -74,6 +84,8 @@ class OnlineCompressor(_ChunkedCompressor):
         # Materialised so a training boundary can look ahead to the next interval
         # (the g_k probe).  Same grouping the decoder replays.
         intervals = list(self._iter_intervals(chunks, self.cfg.train_interval))
+        if self.adjacency_records is not None:
+            self._build_adjacency_plan(intervals)
 
         all_cds = []
         seen: List[ChunkUnit] = []
@@ -87,6 +99,11 @@ class OnlineCompressor(_ChunkedCompressor):
             nxt = intervals[k + 1][0] if k + 1 < len(intervals) else None
             if nxt is None:
                 self._train(train_chunks, phase)          # last full interval: advance only
+            elif self.adjacency_records is not None:
+                if k in self._adj_plan:
+                    self._record_adjacency(phase, k, intervals, self._adj_plan[k], train_chunks)
+                else:
+                    self._train(train_chunks, phase)
             elif self.branch_records is not None:
                 self._record_branch(phase, group, nxt, train_chunks)
             elif self.gk_records is not None:
@@ -215,6 +232,7 @@ class OnlineCompressor(_ChunkedCompressor):
         next_base = self._measure_interval_base(nxt)
 
         snapshot = self._snapshot_state()
+        advance_state = None       # reused reference post-state (saves one train/boundary)
         cands: List[Dict] = []
         for lr in self.branch_lrs:
             self._restore_state(snapshot)        # every candidate branches from S_k
@@ -226,15 +244,24 @@ class OnlineCompressor(_ChunkedCompressor):
                 self._train(train_chunks, phase)
                 curr_bits = self._measure_interval(curr)[0]
                 next_bits = self._measure_interval(nxt)[0]
+                # The reference candidate IS the main advance (same parent, lr and
+                # per-phase seed): snapshot its post-state and reuse it below instead
+                # of training a redundant fourth time — bit-identical, ~25% cheaper.
+                if lr == self.branch_ref_lr:
+                    advance_state = self._snapshot_state()
             cands.append({
                 "lr": lr, "curr_bits": curr_bits, "next_bits": next_bits,
                 "nonfinite": not (math.isfinite(curr_bits) and math.isfinite(next_bits)),
             })
 
-        # Advance the main trajectory by the reference lr from the identical parent.
-        self._restore_state(snapshot)
-        self._set_lr(self.branch_ref_lr)
-        self._train(train_chunks, phase)
+        # Advance the main trajectory to S_{k+1} at the reference lr.  Reuse the
+        # reference candidate's post-state when it was one of the branches; else train.
+        if advance_state is not None:
+            self._restore_state(advance_state)
+        else:
+            self._restore_state(snapshot)
+            self._set_lr(self.branch_ref_lr)
+            self._train(train_chunks, phase)
 
         self.branch_records.append({
             "phase": phase,
@@ -242,6 +269,82 @@ class OnlineCompressor(_ChunkedCompressor):
             "curr": {"tokens": curr_tok, "bytes": curr_by, "bits_base": curr_base},
             "next": {"tokens": next_tok, "bytes": next_by, "bits_base": next_base},
             "candidates": cands,
+        })
+
+    # ------------------------------------------------------------------
+    # V1-A adjacency probe (encoder-side; off unless adjacency_probe set)
+    # ------------------------------------------------------------------
+
+    def _domain_of(self, byte_offset: int) -> object:
+        """Domain label for a stream byte offset (via domain_blocks, else one stream)."""
+        if not self.domain_blocks:
+            return "stream"
+        for blk in self.domain_blocks:
+            if blk["byte_start"] <= byte_offset < blk["byte_end"]:
+                return blk["dataset"]
+        return self.domain_blocks[-1]["dataset"]
+
+    def _build_adjacency_plan(self, intervals) -> None:
+        """Pre-pass: per-interval frozen-base (Static) NLL and domain label, then pick
+        the sampled boundaries + matched controls (pure plan_adjacency).  Static NLL is
+        read under disable_adapter so difficulty matching is adapter-independent."""
+        groups = [g for g, _ in intervals]
+        with self.backend.model.disable_adapter():
+            static_nll = [float(sum(self.backend.measure_interval_bits(self.compressor, g)))
+                          for g in groups]
+        domains, cum = [], 0
+        for g in groups:
+            domains.append(self._domain_of(cum))
+            cum += self.backend.raw_size_bytes(self.backend.from_chunks(g))
+        p = self.adjacency_probe
+        self._adj_static = static_nll
+        self._adj_domains = domains
+        self._adj_plan = dict(plan_adjacency(
+            domains, static_nll, p["h_max"], p["k_controls"], p["n_target"], p["seed"]))
+
+    def _record_adjacency(
+        self, phase: int, k: int, intervals, controls: List[int],
+        train_chunks: List[ChunkUnit],
+    ) -> None:
+        """Score the true future window [k+1, k+h_max] and each matched control window
+        under the pre-update model θ_t, apply the normal OSOA update (θ_t -> θ_t^+), then
+        score the same windows again under θ_t^+.  All bits are the measure_interval_bits
+        NLL twin (framing-free), stored as per-horizon cumulative prefixes so H=1..h_max
+        come from one pass.  The update IS the plain-OSOA advance and the scorings are
+        no-grad reads, so the coded trajectory is byte-identical to a plain run."""
+        h = self.adjacency_probe["h_max"]
+
+        def score_prefixes(start: int) -> List[float]:
+            cum, out = 0.0, []
+            for i in range(h):
+                cum += float(sum(self.backend.measure_interval_bits(
+                    self.compressor, intervals[start + i][0])))
+                out.append(cum)
+            return out
+
+        def mean_prefix(mat: List[List[float]]) -> List[float]:
+            return [sum(row[i] for row in mat) / len(mat) for i in range(h)]
+
+        curr = intervals[k][0]
+        curr_pre = float(sum(self.backend.measure_interval_bits(self.compressor, curr)))
+        adj_pre = score_prefixes(k + 1)
+        ctrl_pre = [score_prefixes(j) for j in controls]
+
+        self._train(train_chunks, phase)                      # plain-OSOA advance to θ_t^+
+
+        curr_post = float(sum(self.backend.measure_interval_bits(self.compressor, curr)))
+        adj_post = score_prefixes(k + 1)
+        ctrl_post = [score_prefixes(j) for j in controls]
+
+        self.adjacency_records.append({
+            "phase": phase, "boundary_k": k,
+            "domain": str(self._adj_domains[k + 1]),
+            "horizons": list(range(1, h + 1)),
+            "future_static_bits": float(sum(self._adj_static[k + 1:k + 1 + h])),
+            "control_starts": controls,
+            "curr_pre_bits": curr_pre, "curr_post_bits": curr_post,
+            "adj_pre": adj_pre, "adj_post": adj_post,
+            "ctrl_pre": mean_prefix(ctrl_pre), "ctrl_post": mean_prefix(ctrl_post),
         })
 
     def decompress(self, archive_bytes: bytes) -> Any:

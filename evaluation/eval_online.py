@@ -204,6 +204,21 @@ def _build_backend(modality: str, model_path: str, device, args):
 # One mode (static | online), with fresh-reload decode verification
 # ---------------------------------------------------------------------------
 
+def _load_domain_blocks(data_path):
+    """Per-domain byte ranges from a mixed-stream sidecar (data/.../mix_manifest.json),
+    used by the adjacency probe to keep controls in-domain.  None for a plain dataset."""
+    if not data_path or not os.path.isdir(data_path):
+        return None
+    p = os.path.join(data_path, "mix_manifest.json")
+    if not os.path.isfile(p):
+        return None
+    try:
+        with open(p, encoding="utf-8") as f:
+            return json.load(f).get("blocks")
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
 def _media_equal(modality: str, recovered, reference) -> bool:
     """Content-level round-trip check: pixel bytes per image, PCM samples per clip
     (WAV header stripped), or the exact string for text."""
@@ -224,6 +239,10 @@ def _run_mode(mode: str, args, device, cfg: OnlineLearningConfig):
 
     branch_lrs = ([float(x) for x in args.branch_lrs.split(",")]
                   if args.branch_lrs else None)
+    adjacency_probe = (dict(h_max=args.adj_h_max, k_controls=args.adj_k,
+                            n_target=args.adj_n, seed=args.adj_seed)
+                       if args.adjacency_probe else None)
+    domain_blocks = _load_domain_blocks(args.data) if adjacency_probe else None
 
     def make_compressor():
         backend = _build_backend(args.modality, args.model, device, args)
@@ -232,7 +251,8 @@ def _run_mode(mode: str, args, device, cfg: OnlineLearningConfig):
                                     shuffle_seed=args.shuffle_seed)
         return OnlineCompressor(backend, device, cfg, shuffle_seed=args.shuffle_seed,
                                 measure_gk=args.measure_gk,
-                                branch_lrs=branch_lrs, branch_ref_lr=args.branch_ref_lr)
+                                branch_lrs=branch_lrs, branch_ref_lr=args.branch_ref_lr,
+                                adjacency_probe=adjacency_probe, domain_blocks=domain_blocks)
 
     comp = make_compressor()
     comp.setup()
@@ -245,6 +265,8 @@ def _run_mode(mode: str, args, device, cfg: OnlineLearningConfig):
     gk_records = getattr(comp, "gk_records", None)
     # Same-state branching records (online + --branch-lrs only; None otherwise).
     branch_records = getattr(comp, "branch_records", None)
+    # V1-A adjacency-probe records (online + --adjacency-probe only; None otherwise).
+    adjacency_records = getattr(comp, "adjacency_records", None)
 
     comp_bytes = len(archive)
     ratio = orig_bytes / max(comp_bytes, 1)
@@ -288,7 +310,7 @@ def _run_mode(mode: str, args, device, cfg: OnlineLearningConfig):
     return dict(mode=mode, orig=orig_bytes, comp=comp_bytes,
                 ratio=ratio, bpb=bpb, bpsp=bpsp, comp_s=comp_s, decomp_s=decomp_s,
                 chunk_lengths=chunk_lengths, chunk_bits=chunk_bits, gk=gk_records,
-                branch=branch_records)
+                branch=branch_records, adjacency=adjacency_records)
 
 
 def _print_comparison(results, modality: str):
@@ -371,6 +393,17 @@ def _build_parser():
                    help="online only: learning rate the main trajectory advances by between "
                         "boundaries under --branch-lrs — the fixed reference policy the branches "
                         "are compared against (default: --lr)")
+    p.add_argument("--adjacency-probe", action="store_true",
+                   help="online only: V1-A adjacency-specific transfer probe. At sampled "
+                        "boundaries, score the true future window and matched non-adjacent "
+                        "controls under the pre/post-update model (frozen forwards; the main "
+                        "trajectory is plain OSOA, byte-identical). Records to "
+                        "results[online].adjacency; analyse with evaluation/adjacency_curve.py. "
+                        "Mutually exclusive with --measure-gk / --branch-lrs.")
+    p.add_argument("--adj-h-max", type=int, default=8, help="adjacency: max future horizon (intervals)")
+    p.add_argument("--adj-k", type=int, default=4, help="adjacency: matched controls per boundary")
+    p.add_argument("--adj-n", type=int, default=128, help="adjacency: target sampled boundaries")
+    p.add_argument("--adj-seed", type=int, default=0, help="adjacency: control-sampling seed")
     p.add_argument("--target-modules", default=None,
                    help="comma-separated LoRA target modules (default: per-modality)")
     p.add_argument("--config", default=None, metavar="PATH",
@@ -472,9 +505,12 @@ def main():
         args.data = _resolve_default_data(args.modality, args.model)
     args.model = os.path.normpath(args.model)
 
-    if args.branch_lrs and args.measure_gk:
-        parser.error("--branch-lrs and --measure-gk are mutually exclusive "
-                     "(both are per-boundary online probes); pick one.")
+    probes = [("--measure-gk", args.measure_gk), ("--branch-lrs", bool(args.branch_lrs)),
+              ("--adjacency-probe", args.adjacency_probe)]
+    on = [name for name, flag in probes if flag]
+    if len(on) > 1:
+        parser.error(f"{', '.join(on)} are mutually exclusive (per-boundary online "
+                     f"probes); pick one.")
 
     ensure_deterministic()
     device = torch.device(args.device)

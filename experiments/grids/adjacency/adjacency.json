@@ -1,0 +1,36 @@
+{
+  "group_name": "adjacency",
+  "note": "V1-A adjacency-specific transfer probe. At sampled boundaries, apply one fixed-OSOA update then FREEZE and score the true future window [k+1,k+h_max] and K matched non-adjacent same-domain controls under the pre/post-update model; T = G_adj - G_ctrl isolates adjacency-specific gain from generic domain adaptation. The main trajectory is plain OSOA (byte-identical, determinism preserved); only frozen forwards are added, so cost is ~1x a plain run plus one base pre-pass (much cheaper than the branching probe). Fixed r32/alpha64/ep3/ti1, lr=1e-4 (best fixed OSOA), compress-only. Controls are difficulty-matched (static-NLL decile) + non-adjacent (>=2*h_max) + non-overlapping; doc/session/file matching is NOT applied (concatenated streams carry no such labels). n_target=128 is a target; small datasets yield fewer well-spaced boundaries. Analyse with evaluation/adjacency_curve.py (pooled + per-dataset T_pct/G_adj/T_share, block bootstrap, sign-flip permutation, PASS/SIGNIFICANT-BUT-SMALL/FAIL). loghub and codesearchnet are the high-adjacency candidates most likely to show T>0; enwik9/beancounter/pile_of_law are the prose controls. adjacency_probe is mutually exclusive with measure_gk and branch_lrs. lora_r fixed -> alpha=2*r.",
+  "modality": "text",
+  "fixed": {
+    "model": "checkpoints/Qwen3-0.6B-Base",
+    "max_bytes": 10000000,
+    "chunk_size": 2048,
+    "batch_chunks": 8,
+    "lora_r": 32,
+    "lr": 1e-04,
+    "epochs_per_train": 3,
+    "train_interval": 1,
+    "target_modules": "q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj",
+    "base_seed": 42,
+    "lora_dropout": 0.0,
+    "grad_clip": 1.0,
+    "weight_decay": 0.01,
+    "train_on_all": false,
+    "no_decompress": true,
+    "adjacency_probe": true,
+    "adj_h_max": 8,
+    "adj_k": 4,
+    "adj_n": 128,
+    "adj_seed": 0
+  },
+  "grid": {
+    "data": [
+      "data/text/raw/loghub",
+      "data/text/raw/codesearchnet",
+      "data/text/raw/enwik9",
+      "data/text/raw/beancounter",
+      "data/text/raw/pile_of_law_eurlex"
+    ]
+  }
+}
