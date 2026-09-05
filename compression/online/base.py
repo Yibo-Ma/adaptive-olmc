@@ -15,17 +15,21 @@ import torch
 
 from compression.types import CompressedData
 from compression.online.backends.base import ChunkUnit, OnlineBackend
+from compression.online.context_window import ContextWindow
 from utils import online_archive as ar
 
 
 class _ChunkedCompressor(ABC):
 
     def __init__(self, backend: OnlineBackend, device: torch.device,
-                 shuffle_seed: Optional[int] = None) -> None:
+                 shuffle_seed: Optional[int] = None, ctx_tokens: int = 0) -> None:
         self.backend = backend
         self.device = device
         self.shuffle_seed = shuffle_seed   # None = natural stream order
         self.compressor = None        # set in setup()
+        # Cross-chunk context: 0 keeps the historical behaviour (every chunk coded
+        # from a bare BOS, so information crosses a boundary only through weights).
+        self.ctx = ContextWindow(ctx_tokens)
 
     # ------------------------------------------------------------------
     # Interval iteration
@@ -90,6 +94,8 @@ class _ChunkedCompressor(ABC):
         settings = dict(self._settings())
         if self.shuffle_seed is not None:
             settings["shuffle_seed"] = self.shuffle_seed
+        if self.ctx.enabled:
+            settings["ctx_tokens"] = self.ctx.ctx_tokens
         return settings
 
     # ------------------------------------------------------------------

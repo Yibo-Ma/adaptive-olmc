@@ -110,14 +110,20 @@ class _BGPTByteBackend(OnlineBackend):
     # ------------------------------------------------------------------
 
     def encode_interval(
-        self, compressor: BaseCompressor, chunks: List[ChunkUnit]
+        self, compressor: BaseCompressor, chunks: List[ChunkUnit],
+        ctx_ids=None,
     ) -> List[CompressedData]:
+        if ctx_ids:
+            raise NotImplementedError("bGPT backend has no prompt-context path")
         segments = [(bytes(c.token_ids), self.ext) for c in chunks]
         return compressor.compress_batch(segments)
 
     def decode_interval(
-        self, compressor: BaseCompressor, cds: List[CompressedData]
+        self, compressor: BaseCompressor, cds: List[CompressedData],
+        ctx_ids=None,
     ) -> List[ChunkUnit]:
+        if ctx_ids:
+            raise NotImplementedError("bGPT backend has no prompt-context path")
         # ext is fixed per modality, so it need not be stored in the archive;
         # restore it on the rebuilt CompressedData before decoding.
         for cd in cds:

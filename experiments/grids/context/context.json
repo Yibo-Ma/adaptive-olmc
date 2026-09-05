@@ -1,0 +1,31 @@
+{
+  "group_name": "context",
+  "note": "Context-vs-adaptation decomposition (A/B/C/D). The coder normally starts every chunk from a bare BOS, so information crosses a chunk boundary ONLY through the adapted weights; ctx_tokens prepends the last N already-coded tokens instead (rebuilt identically by the decoder, zero transmitted bits, folded into the archive hash). mode=both gives two cells per run, so ctx_tokens [0, 2048] x data covers the whole square: A=static/ctx0, B=online/ctx0, C=static/ctxN, D=online/ctxN. Reads: C vs A = what plain context is worth; D vs C = what adaptation still adds once context exists; overlap = (B+C)-D tells whether the two capture the same information. Fixed r32/alpha64/ep3/ti1/lr1e-4, compress-only. Cost note: context doubles the coded sequence (2048 ctx + 2048 data) so attention gets dearer; do NOT cache KV across a weight update (stale after every boundary) - just recompute. ctx_tokens cannot be combined with the g_k / branch / adjacency probes (measure_interval_bits still mirrors the BOS path). Analyse with evaluation/context_curve.py. lora_r fixed -> alpha=2*r.",
+  "modality": "text",
+  "fixed": {
+    "model": "checkpoints/Qwen3-0.6B-Base",
+    "mode": "both",
+    "max_bytes": 10000000,
+    "chunk_size": 2048,
+    "batch_chunks": 8,
+    "lora_r": 32,
+    "lr": 1e-04,
+    "epochs_per_train": 3,
+    "train_interval": 1,
+    "target_modules": "q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj",
+    "base_seed": 42,
+    "lora_dropout": 0.0,
+    "grad_clip": 1.0,
+    "weight_decay": 0.01,
+    "train_on_all": false,
+    "no_decompress": true
+  },
+  "grid": {
+    "data": [
+      "data/text/raw/enwik9",
+      "data/text/raw/beancounter",
+      "data/text/raw/pile_of_law_eurlex"
+    ],
+    "ctx_tokens": [0, 2048]
+  }
+}

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import torch
 import torch.nn.functional as F
@@ -93,18 +93,21 @@ class OnlineBackend(ABC):
 
     @abstractmethod
     def encode_interval(
-        self, compressor: BaseCompressor, chunks: List[ChunkUnit]
+        self, compressor: BaseCompressor, chunks: List[ChunkUnit],
+        ctx_ids: Optional[List[int]] = None,
     ) -> List[CompressedData]:
         ...
 
     @abstractmethod
     def decode_interval(
-        self, compressor: BaseCompressor, cds: List[CompressedData]
+        self, compressor: BaseCompressor, cds: List[CompressedData],
+        ctx_ids: Optional[List[int]] = None,
     ) -> List[ChunkUnit]:
         ...
 
     def measure_interval_bits(
-        self, compressor: BaseCompressor, chunks: List[ChunkUnit]
+        self, compressor: BaseCompressor, chunks: List[ChunkUnit],
+        ctx_ids: Optional[List[int]] = None,
     ) -> List[float]:
         """Per-chunk model code length (bits) for an interval at the *current*
         model state — the measurement twin of ``encode_interval`` used by the g_k

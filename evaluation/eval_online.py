@@ -248,11 +248,13 @@ def _run_mode(mode: str, args, device, cfg: OnlineLearningConfig):
         backend = _build_backend(args.modality, args.model, device, args)
         if mode == "static":
             return StaticCompressor(backend, device, batch_chunks=args.batch_chunks,
-                                    shuffle_seed=args.shuffle_seed)
+                                    shuffle_seed=args.shuffle_seed,
+                                    ctx_tokens=args.ctx_tokens)
         return OnlineCompressor(backend, device, cfg, shuffle_seed=args.shuffle_seed,
                                 measure_gk=args.measure_gk,
                                 branch_lrs=branch_lrs, branch_ref_lr=args.branch_ref_lr,
-                                adjacency_probe=adjacency_probe, domain_blocks=domain_blocks)
+                                adjacency_probe=adjacency_probe, domain_blocks=domain_blocks,
+                                ctx_tokens=args.ctx_tokens)
 
     comp = make_compressor()
     comp.setup()
@@ -393,6 +395,13 @@ def _build_parser():
                    help="online only: learning rate the main trajectory advances by between "
                         "boundaries under --branch-lrs — the fixed reference policy the branches "
                         "are compared against (default: --lr)")
+    p.add_argument("--ctx-tokens", type=int, default=0, metavar="N",
+                   help="cross-chunk context: prepend the last N already-coded tokens "
+                        "before each chunk (0 = the historical behaviour, every chunk "
+                        "coded from a bare BOS). Applies to BOTH static and online, so "
+                        "context-on/off x adaptation-on/off is a clean 2x2. Rebuilt "
+                        "identically by the decoder, so it costs zero transmitted bits. "
+                        "Cannot be combined with the g_k / branch / adjacency probes.")
     p.add_argument("--adjacency-probe", action="store_true",
                    help="online only: V1-A adjacency-specific transfer probe. At sampled "
                         "boundaries, score the true future window and matched non-adjacent "
@@ -511,6 +520,10 @@ def main():
     if len(on) > 1:
         parser.error(f"{', '.join(on)} are mutually exclusive (per-boundary online "
                      f"probes); pick one.")
+    if args.ctx_tokens and on:
+        parser.error(f"--ctx-tokens cannot be combined with {on[0]}: the probes measure "
+                     f"through the BOS-prefixed measure_interval_bits and would report "
+                     f"bits the coder never bills. Run them separately.")
 
     ensure_deterministic()
     device = torch.device(args.device)

@@ -34,8 +34,18 @@ class OnlineCompressor(_ChunkedCompressor):
         shuffle_seed: Optional[int] = None, measure_gk: bool = False,
         branch_lrs: Optional[List[float]] = None, branch_ref_lr: Optional[float] = None,
         adjacency_probe: Optional[Dict] = None, domain_blocks: Optional[List[Dict]] = None,
+        ctx_tokens: int = 0,
     ) -> None:
-        super().__init__(backend, device, shuffle_seed=shuffle_seed)
+        super().__init__(backend, device, shuffle_seed=shuffle_seed,
+                         ctx_tokens=ctx_tokens)
+        # The probes measure through measure_interval_bits, which mirrors the
+        # BOS-prefixed coding path only — pairing them with cross-chunk context would
+        # report bits the coder never bills.  Refuse rather than misreport.
+        if ctx_tokens and (measure_gk or branch_lrs or adjacency_probe):
+            raise ValueError(
+                "cross-chunk context (ctx_tokens>0) cannot be combined with the "
+                "g_k / branch / adjacency probes: measure_interval_bits still "
+                "mirrors the BOS-prefixed path. Run them separately.")
         self.cfg = cfg
         self.optimizer = None
         self.trainer = None
@@ -91,7 +101,9 @@ class OnlineCompressor(_ChunkedCompressor):
         seen: List[ChunkUnit] = []
         phase = 0
         for k, (group, is_tail) in enumerate(intervals):
-            all_cds.extend(self.backend.encode_interval(self.compressor, group))
+            all_cds.extend(self.backend.encode_interval(
+                self.compressor, group, ctx_ids=self.ctx.tail()))
+            self.ctx.extend(c.token_ids for c in group)
             seen.extend(group)
             if is_tail:
                 continue
@@ -354,7 +366,9 @@ class OnlineCompressor(_ChunkedCompressor):
         seen: List[ChunkUnit] = []
         phase = 0
         for group, is_tail in self._iter_intervals(cds, self.cfg.train_interval):
-            chunk_units = self.backend.decode_interval(self.compressor, group)
+            chunk_units = self.backend.decode_interval(
+                self.compressor, group, ctx_ids=self.ctx.tail())
+            self.ctx.extend(c.token_ids for c in chunk_units)
             decoded.extend(chunk_units)
             seen.extend(chunk_units)
             if not is_tail:

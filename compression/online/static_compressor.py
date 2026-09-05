@@ -21,9 +21,10 @@ class StaticCompressor(_ChunkedCompressor):
 
     def __init__(
         self, backend: OnlineBackend, device: torch.device, batch_chunks: int = 4,
-        shuffle_seed: Optional[int] = None,
+        shuffle_seed: Optional[int] = None, ctx_tokens: int = 0,
     ) -> None:
-        super().__init__(backend, device, shuffle_seed=shuffle_seed)
+        super().__init__(backend, device, shuffle_seed=shuffle_seed,
+                         ctx_tokens=ctx_tokens)
         self.batch_chunks = batch_chunks
 
     def _settings(self) -> Dict:
@@ -41,7 +42,9 @@ class StaticCompressor(_ChunkedCompressor):
 
         all_cds = []
         for group, _ in self._iter_intervals(chunks, self.batch_chunks):
-            all_cds.extend(self.backend.encode_interval(self.compressor, group))
+            all_cds.extend(self.backend.encode_interval(
+                self.compressor, group, ctx_ids=self.ctx.tail()))
+            self.ctx.extend(c.token_ids for c in group)
 
         return self._assemble_archive(self.ROLE, all_cds, total_ob, framing)
 
@@ -50,6 +53,9 @@ class StaticCompressor(_ChunkedCompressor):
 
         decoded: List[ChunkUnit] = []
         for group, _ in self._iter_intervals(cds, self.batch_chunks):
-            decoded.extend(self.backend.decode_interval(self.compressor, group))
+            chunk_units = self.backend.decode_interval(
+                self.compressor, group, ctx_ids=self.ctx.tail())
+            decoded.extend(chunk_units)
+            self.ctx.extend(c.token_ids for c in chunk_units)
 
         return self._finalize(self._restore_order(decoded), total_ob, framing)
