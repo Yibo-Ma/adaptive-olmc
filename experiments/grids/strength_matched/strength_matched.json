@@ -1,0 +1,26 @@
+{
+  "group_name": "strength_matched",
+  "note": "EXPERIMENT 2: is rank just another strength knob, or does it carry independent directional content? The paradox to explain: at lr 1e-4 on this stream r128 fits harder (mean delta_in 31.1% vs 11.9%) and transfers more to adjacent chunks (V1-A T 1.27% vs 0.61%), yet its full-stream gain is far worse (4.09% vs 9.94%). If rank were purely a strength knob, r128 run at a lower lr - so that its realised strength (mean delta_in) matches r32 - should land on the SAME point of the delta_in -> delta_pct curve. Read on the (delta_in, delta_pct) plane via collapse_curve.py: r128 ON the r32 curve = rank is pure strength, the direction-correction premise dies (just tune lr). r128 BELOW the curve at matched delta_in = the extra directions are actively harmful, so there is something to fix. r128 ABOVE = extra directions help and matched strength is all you need. Reuses the existing gk_mixed points at lr 1e-4, so only the other three lrs are swept here. measure_gk is what supplies mean delta_in. lr 3e-4 may diverge at r128; that is informative and collapse_curve marks it. lora_r is in the grid -> alpha=2*r.",
+  "modality": "text",
+  "fixed": {
+    "model": "checkpoints/Qwen3-0.6B-Base",
+    "data": "data/text/raw/mix_enwik9_beancounter_pile",
+    "max_bytes": 10000000,
+    "chunk_size": 2048,
+    "batch_chunks": 8,
+    "epochs_per_train": 3,
+    "train_interval": 1,
+    "target_modules": "q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj",
+    "base_seed": 42,
+    "lora_dropout": 0.0,
+    "grad_clip": 1.0,
+    "weight_decay": 0.01,
+    "train_on_all": false,
+    "no_decompress": true,
+    "measure_gk": true
+  },
+  "grid": {
+    "lora_r": [32, 128],
+    "lr": [1e-05, 3e-05, 3e-04]
+  }
+}

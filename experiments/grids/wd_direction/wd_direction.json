@@ -1,0 +1,26 @@
+{
+  "group_name": "wd_direction",
+  "note": "EXPERIMENT 3a: can a cheap standard regulariser fix r128 without a learned direction corrector? V1-A showed r128 has T_share > 1, i.e. its update helps the adjacent future but HURTS matched non-adjacent same-domain windows - the signature of writing directions that are locally useful and globally harmful. AdamW weight decay on the LoRA parameters shrinks the adapter toward zero, i.e. toward the frozen base, which is the cheapest possible version of that fix. The test is NOT just whether delta_pct improves: read it on the (delta_in, delta_pct) plane against the strength_matched curve. If stronger decay only lowers delta_in and slides ALONG the common curve, it is merely another strength knob and nothing was fixed. If it keeps delta_in roughly put while lifting delta_pct ABOVE the curve, then direction quality genuinely improved by cheap means - and a learned corrector has to beat that, not just beat plain r128. wd 0.01 is the current default and already exists in gk_mixed, kept here so the series is self-contained. lora_r fixed -> alpha=2*r.",
+  "modality": "text",
+  "fixed": {
+    "model": "checkpoints/Qwen3-0.6B-Base",
+    "data": "data/text/raw/mix_enwik9_beancounter_pile",
+    "max_bytes": 10000000,
+    "chunk_size": 2048,
+    "batch_chunks": 8,
+    "lora_r": 128,
+    "lr": 1e-04,
+    "epochs_per_train": 3,
+    "train_interval": 1,
+    "target_modules": "q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj",
+    "base_seed": 42,
+    "lora_dropout": 0.0,
+    "grad_clip": 1.0,
+    "train_on_all": false,
+    "no_decompress": true,
+    "measure_gk": true
+  },
+  "grid": {
+    "weight_decay": [0.01, 0.1, 0.3]
+  }
+}
