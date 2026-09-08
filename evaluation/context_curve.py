@@ -4,7 +4,7 @@ The coder normally starts every chunk from a bare BOS, so nothing crosses a chun
 boundary except through the adapted weights.  ``eval_online.py --ctx-tokens N``
 lifts that restriction for BOTH modes, which turns the question "how much of OSOA's
 gain is real adaptation and how much is it standing in for the truncated context?"
-into a clean 2x2:
+into a square, one per context length N:
 
     A = static, ctx 0     B = online, ctx 0      (the historical setup)
     C = static, ctx N     D = online, ctx N
@@ -14,13 +14,18 @@ into a clean 2x2:
     overlap: (gain_B + gain_C) - gain_D  -> 0 means the two are complementary,
              large means they were capturing the same information
 
+Several N may be swept at once (e.g. 0 / 2048 / 6144).  A and B come from the ctx-0
+runs and are shared; every non-zero N gets its own square, so the ladder shows
+whether adaptation's residual value (D - C) shrinks as context grows.
+
     eval_online.py --mode both --ctx-tokens 0    --json runs/enwik9_ctx0.json
     eval_online.py --mode both --ctx-tokens 2048 --json runs/enwik9_ctx2048.json
+    eval_online.py --mode both --ctx-tokens 6144 --json runs/enwik9_ctx6144.json
     python evaluation/context_curve.py runs/*.json --out-dir figs
 
-Pass every run; cells are identified from each JSON's own args (mode x ctx_tokens)
-and grouped by dataset.  Pure arithmetic is separated from I/O so tests can pin it
-(mirrors gk_curve / branch_curve).
+Cells are identified from each JSON's own args (mode x ctx_tokens) and grouped by
+dataset.  Pure arithmetic is separated from I/O so tests can pin it (mirrors
+gk_curve / branch_curve).
 """
 from __future__ import annotations
 
@@ -30,31 +35,18 @@ import os
 import sys
 from typing import Dict, List, Optional, Tuple
 
-CELLS = {(False, False): "A", (True, False): "B", (False, True): "C", (True, True): "D"}
-CELL_DESC = {"A": "static  ctx0", "B": "online  ctx0",
-             "C": "static  ctxN", "D": "online  ctxN"}
-
-
-def cell_of(mode: str, ctx_tokens: int) -> Optional[str]:
-    """A/B/C/D from (mode, ctx_tokens); None for modes outside the 2x2."""
-    if mode not in ("static", "online"):
-        return None
-    return CELLS[(mode == "online", int(ctx_tokens or 0) > 0)]
-
 
 def gain_pct(base_comp: float, comp: float) -> float:
     """Compressed-size reduction vs the A cell, in % (higher = better)."""
     return 100.0 * (base_comp - comp) / base_comp if base_comp else 0.0
 
 
-def decompose(cells: Dict[str, Dict]) -> Optional[Dict[str, float]]:
-    """The three decisive numbers plus the overlap, from one stream's A/B/C/D cells."""
-    if not {"A", "B", "C", "D"} <= set(cells):
-        return None
-    a = cells["A"]["comp"]
-    g_b = gain_pct(a, cells["B"]["comp"])          # adaptation alone
-    g_c = gain_pct(a, cells["C"]["comp"])          # context alone
-    g_d = gain_pct(a, cells["D"]["comp"])          # both
+def decompose(a_comp: float, b_comp: float, c_comp: float,
+              d_comp: float) -> Dict[str, float]:
+    """The three decisive numbers plus the overlap, from one square's four sizes."""
+    g_b = gain_pct(a_comp, b_comp)                 # adaptation alone
+    g_c = gain_pct(a_comp, c_comp)                 # context alone
+    g_d = gain_pct(a_comp, d_comp)                 # both
     return dict(
         gain_B=g_b, gain_C=g_c, gain_D=g_d,
         d_vs_c=g_d - g_c,                          # adaptation's residual value given context
@@ -64,89 +56,102 @@ def decompose(cells: Dict[str, Dict]) -> Optional[Dict[str, float]]:
     )
 
 
+def squares(ladder: Dict[int, Dict[str, Dict]]) -> Dict[int, Dict[str, float]]:
+    """One decomposition per non-zero ctx, sharing the ctx-0 A/B cells.
+
+    ``ladder`` is {ctx_tokens: {mode: result_row}}.  Contexts whose square is
+    incomplete are skipped rather than half-reported."""
+    base = ladder.get(0, {})
+    if "static" not in base or "online" not in base:
+        return {}
+    a, b = base["static"]["comp"], base["online"]["comp"]
+    out = {}
+    for ctx, cells in sorted(ladder.items()):
+        if ctx == 0 or "static" not in cells or "online" not in cells:
+            continue
+        out[ctx] = decompose(a, b, cells["static"]["comp"], cells["online"]["comp"])
+    return out
+
+
 # ---------------------------------------------------------------------------
 # I/O
 # ---------------------------------------------------------------------------
 
-def load_run(path: str) -> List[Tuple[str, str, Dict]]:
-    """Return [(dataset, cell, result_row), ...] for every mode present in one JSON."""
+def load_run(path: str) -> List[Tuple[str, int, str, Dict]]:
+    """Return [(dataset, ctx_tokens, mode, result_row), ...] for one JSON."""
     with open(path, encoding="utf-8") as f:
         blob = json.load(f)
     args = blob.get("args", {})
     ds = os.path.basename(str(args.get("data", "")).rstrip("/\\")) or "stream"
     ctx = int(args.get("ctx_tokens", 0) or 0)
-    out = []
-    for r in blob.get("results", []):
-        c = cell_of(r.get("mode", ""), ctx)
-        if c:
-            out.append((ds, c, dict(r, ctx_tokens=ctx, source=path)))
-    return out
+    return [(ds, ctx, r["mode"], dict(r, source=path))
+            for r in blob.get("results", [])
+            if r.get("mode") in ("static", "online")]
 
 
-def summarize(by_ds: Dict[str, Dict[str, Dict]]) -> Dict:
+def summarize(by_ds: Dict[str, Dict[int, Dict[str, Dict]]]) -> Dict:
     print(f"\n{'=' * 78}\n  Context vs adaptation decomposition  "
           f"({len(by_ds)} dataset(s))\n{'=' * 78}")
-    summary = {}
-    for ds, cells in by_ds.items():
-        ctxn = next((c["ctx_tokens"] for c in cells.values() if c["ctx_tokens"]), 0)
-        print(f"\n  {ds}   (ctx N = {ctxn} tokens)")
-        print(f"  {'cell':<6}{'setup':<16}{'bytes':>12}{'bpb':>10}{'gain vs A':>12}")
-        print("  " + "-" * 56)
-        a = cells.get("A", {}).get("comp")
-        for c in ("A", "B", "C", "D"):
-            if c not in cells:
-                print(f"  {c:<6}{CELL_DESC[c]:<16}{'(missing)':>12}")
-                continue
-            r = cells[c]
-            g = gain_pct(a, r["comp"]) if a else float("nan")
-            print(f"  {c:<6}{CELL_DESC[c]:<16}{r['comp']:>12}{r['bpb']:>10.4f}{g:>11.2f}%")
-        d = decompose(cells)
-        summary[ds] = d
-        if d is None:
-            print("  (incomplete 2x2 - run --mode both at ctx 0 and ctx N)")
+    summary: Dict[str, Dict] = {}
+    for ds, ladder in sorted(by_ds.items()):
+        print(f"\n  {ds}")
+        base = ladder.get(0, {})
+        a = base.get("static", {}).get("comp")
+        print(f"  {'ctx':>7}{'static B':>12}{'online B':>12}"
+              f"{'C vs A':>10}{'D vs A':>10}{'D vs C':>10}")
+        print("  " + "-" * 61)
+        for ctx, cells in sorted(ladder.items()):
+            s = cells.get("static", {}).get("comp")
+            o = cells.get("online", {}).get("comp")
+            gc = f"{gain_pct(a, s):>9.2f}%" if (a and s) else f"{'-':>10}"
+            gd = f"{gain_pct(a, o):>9.2f}%" if (a and o) else f"{'-':>10}"
+            dvc = (f"{gain_pct(a, o) - gain_pct(a, s):>9.2f}%"
+                   if (a and s and o) else f"{'-':>10}")
+            print(f"  {ctx:>7}{(s if s else '-'):>12}{(o if o else '-'):>12}"
+                  f"{gc}{gd}{dvc}")
+        sq = squares(ladder)
+        summary[ds] = sq
+        if not sq:
+            print("    (no complete square - need --mode both at ctx 0 and at some N)")
             continue
-        print("  " + "-" * 56)
-        print(f"    C vs A  context alone                = {d['gain_C']:+.2f} %")
-        print(f"    B vs A  adaptation alone             = {d['gain_B']:+.2f} %")
-        print(f"    D vs A  both                         = {d['gain_D']:+.2f} %")
-        print(f"    D vs C  adaptation GIVEN context     = {d['d_vs_c']:+.2f} %"
-              f"   <- does OSOA survive?")
-        print(f"    D vs B  context GIVEN adaptation     = {d['d_vs_b']:+.2f} %")
-        print(f"    overlap (B+C-D)                      = {d['overlap']:+.2f} %"
-              f"   (0 = complementary)")
+        for ctx, d in sq.items():
+            print(f"\n    ctx {ctx}:  B (adapt alone) = {d['gain_B']:+.2f} %"
+                  f"   C (context alone) = {d['gain_C']:+.2f} %"
+                  f"   D (both) = {d['gain_D']:+.2f} %")
+            print(f"              D-C adaptation GIVEN context = {d['d_vs_c']:+.2f} %"
+                  f"   <- does OSOA survive?")
+            print(f"              D-B context GIVEN adaptation = {d['d_vs_b']:+.2f} %"
+                  f"   overlap (B+C-D) = {d['overlap']:+.2f} %")
     print("=" * 78)
     return summary
 
 
-def plot(by_ds: Dict[str, Dict[str, Dict]], out_path: str) -> bool:
+def plot(by_ds: Dict[str, Dict[int, Dict[str, Dict]]], out_path: str) -> bool:
     try:
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
     except Exception:
         return False
-    dss = [d for d in by_ds if decompose(by_ds[d])]
-    if not dss:
+    usable = {ds: squares(l) for ds, l in by_ds.items()}
+    usable = {ds: sq for ds, sq in usable.items() if sq}
+    if not usable:
         return False
-    dec = {d: decompose(by_ds[d]) for d in dss}
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 5))
     fig.suptitle("Cross-chunk context vs weight adaptation", fontweight="bold")
-    x = list(range(len(dss)))
-    w = 0.27
-    ax1.bar([i - w for i in x], [dec[d]["gain_C"] for d in dss], w, label="C: context only")
-    ax1.bar(x, [dec[d]["gain_B"] for d in dss], w, label="B: adaptation only")
-    ax1.bar([i + w for i in x], [dec[d]["gain_D"] for d in dss], w, label="D: both")
-    ax1.set_xticks(x); ax1.set_xticklabels(dss, rotation=20, ha="right", fontsize=8)
-    ax1.set_ylabel("gain vs A  [%]"); ax1.legend(fontsize=8); ax1.grid(alpha=0.25, axis="y")
-
-    ax2.bar([i - w / 2 for i in x], [dec[d]["d_vs_c"] for d in dss], w,
-            label="D-C: adaptation given context", color="#2ca02c")
-    ax2.bar([i + w / 2 for i in x], [dec[d]["overlap"] for d in dss], w,
-            label="overlap (B+C-D)", color="#d62728")
-    ax2.axhline(0, color="k", lw=0.8)
-    ax2.set_xticks(x); ax2.set_xticklabels(dss, rotation=20, ha="right", fontsize=8)
-    ax2.set_ylabel("[%]"); ax2.legend(fontsize=8); ax2.grid(alpha=0.25, axis="y")
-
+    for ds, sq in sorted(usable.items()):
+        ctxs = sorted(sq)
+        ax1.plot(ctxs, [sq[c]["gain_C"] for c in ctxs], "o--", label=f"{ds}  C (context)")
+        ax1.plot(ctxs, [sq[c]["gain_D"] for c in ctxs], "o-", label=f"{ds}  D (both)")
+        ax2.plot(ctxs, [sq[c]["d_vs_c"] for c in ctxs], "o-", label=ds)
+        # adaptation alone is context-independent: one flat reference per dataset
+        ax2.axhline(sq[ctxs[0]]["gain_B"], lw=0.6, ls=":", alpha=0.5)
+    ax1.set_xlabel("ctx tokens"); ax1.set_ylabel("gain vs A  [%]")
+    ax1.legend(fontsize=7); ax1.grid(alpha=0.25)
+    ax2.set_xlabel("ctx tokens")
+    ax2.set_ylabel("D - C: adaptation given context  [%]")
+    ax2.set_title("dotted = B (adaptation alone, ctx 0)", fontsize=8)
+    ax2.legend(fontsize=7); ax2.grid(alpha=0.25)
     fig.tight_layout(rect=[0, 0, 1, 0.94])
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
     fig.savefig(out_path, dpi=160, bbox_inches="tight")
@@ -161,21 +166,21 @@ def main() -> int:
     except Exception:
         pass
     p = argparse.ArgumentParser(
-        description="Decompose gain into context vs adaptation (A/B/C/D)")
+        description="Decompose gain into context vs adaptation (A/B/C/D per ctx level)")
     p.add_argument("results", nargs="+", metavar="RESULT_JSON")
     p.add_argument("--out-dir", default=None)
     p.add_argument("--no-plot", action="store_true")
     args = p.parse_args()
 
-    by_ds: Dict[str, Dict[str, Dict]] = {}
+    by_ds: Dict[str, Dict[int, Dict[str, Dict]]] = {}
     for path in args.results:
         try:
             rows = load_run(path)
         except (OSError, json.JSONDecodeError) as e:
             print(f"  [skip] {path}: {e}")
             continue
-        for ds, cell, row in rows:
-            by_ds.setdefault(ds, {})[cell] = row
+        for ds, ctx, mode, row in rows:
+            by_ds.setdefault(ds, {}).setdefault(ctx, {})[mode] = row
     if not by_ds:
         return 1
 

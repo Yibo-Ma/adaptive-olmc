@@ -2,7 +2,7 @@
 
 Covers compression/online/context_window.ContextWindow (the rolling tail contract
 that both endpoints must reproduce identically) and evaluation/context_curve's
-A/B/C/D decomposition arithmetic.  No torch.
+per-context-length A/B/C/D decomposition.  No torch.
 
 Runnable two ways (the repo ships no pytest dependency):
     python tests/test_context.py
@@ -63,18 +63,8 @@ def test_generator_input_and_empty_chunks():
 
 # ---- context_curve decomposition ----------------------------------------
 
-def test_cell_mapping():
-    assert cc.cell_of("static", 0) == "A"
-    assert cc.cell_of("online", 0) == "B"
-    assert cc.cell_of("static", 2048) == "C"
-    assert cc.cell_of("online", 2048) == "D"
-    assert cc.cell_of("both", 0) is None
-
-
 def test_decompose_math():
-    cells = {"A": {"comp": 1000.0}, "B": {"comp": 900.0},
-             "C": {"comp": 950.0}, "D": {"comp": 880.0}}
-    d = cc.decompose(cells)
+    d = cc.decompose(1000.0, 900.0, 950.0, 880.0)
     _close(d["gain_B"], 10.0)      # adaptation alone
     _close(d["gain_C"], 5.0)       # context alone
     _close(d["gain_D"], 12.0)      # both
@@ -84,15 +74,38 @@ def test_decompose_math():
     _close(d["overlap"], 3.0)      # 15 expected vs 12 realised -> 3pp redundant
 
 
-def test_decompose_requires_full_square():
-    assert cc.decompose({"A": {"comp": 1.0}, "B": {"comp": 1.0}}) is None
+def test_several_context_lengths_each_get_their_own_square():
+    """Regression: two non-zero ctx levels must NOT collapse onto one C/D pair."""
+    ladder = {
+        0:    {"static": {"comp": 1000.0}, "online": {"comp": 900.0}},
+        2048: {"static": {"comp": 950.0},  "online": {"comp": 880.0}},
+        6144: {"static": {"comp": 900.0},  "online": {"comp": 860.0}},
+    }
+    sq = cc.squares(ladder)
+    assert sorted(sq) == [2048, 6144]
+    _close(sq[2048]["gain_C"], 5.0)
+    _close(sq[2048]["d_vs_c"], 7.0)
+    _close(sq[6144]["gain_C"], 10.0)
+    _close(sq[6144]["gain_D"], 14.0)
+    _close(sq[6144]["d_vs_c"], 4.0)      # adaptation's residual value shrinks with context
+    # A and B are shared, so adaptation-alone is identical across the ladder
+    _close(sq[2048]["gain_B"], sq[6144]["gain_B"])
+
+
+def test_squares_skip_incomplete_and_need_ctx0():
+    ladder = {0: {"static": {"comp": 1000.0}, "online": {"comp": 900.0}},
+              2048: {"static": {"comp": 950.0}}}          # online run missing
+    assert cc.squares(ladder) == {}
+    assert cc.squares({2048: {"static": {"comp": 1.0},
+                              "online": {"comp": 1.0}}}) == {}   # no ctx-0 baseline
 
 
 def main() -> int:
     tests = [test_disabled_is_exactly_the_old_behaviour, test_tail_is_none_before_any_chunk,
              test_tail_accumulates_in_coding_order, test_trims_to_window_keeping_the_most_recent,
-             test_generator_input_and_empty_chunks, test_cell_mapping,
-             test_decompose_math, test_decompose_requires_full_square]
+             test_generator_input_and_empty_chunks, test_decompose_math,
+             test_several_context_lengths_each_get_their_own_square,
+             test_squares_skip_incomplete_and_need_ctx0]
     for t in tests:
         t()
         print(f"  ok  {t.__name__}")

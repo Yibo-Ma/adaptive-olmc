@@ -1,0 +1,30 @@
+{
+  "group_name": "strength_matched_fill",
+  "note": "EXPERIMENT 2, hole-filling run. The first strength_matched sweep left the r32 curve unmeasured between mean delta_in ~5 and ~25 (it only sampled lr 1e-5 / 3e-5 / 3e-4), and every interesting r128 point lands inside that hole. Interpolating linearly across an inverted-U peak biases the r32 reference DOWNWARD, which inflates the apparent gap - that is why the first readout reported r128 sitting +1.8 to +4.7 ABOVE the r32 curve while the directly comparable near-matched pairs (mix 7.04 vs 7.17, pile 12.86 vs 13.04, enwik 4.60 vs 4.39) show the two ranks essentially coincident. These two extra learning rates put r32 points at roughly delta_in 12 and 24, which bracket the r128 points at delta_in ~11 and ~31 directly, so the comparison no longer needs interpolation across the peak. Second question these runs answer: the best configuration sampled so far is r128 at lr 3e-5 (mix 10.09, pile 16.75) - does it actually beat r32 at lr 1e-4, the frozen default? If yes by a couple of points, the current frozen config is simply mistuned. Group name deliberately contains strength_matched so the existing readout command picks these runs up with no change. Everything else is identical to strength_matched. lora_r fixed -> alpha=2*r; mode is left at its default (both) because delta_pct needs the static arm.",
+  "modality": "text",
+  "fixed": {
+    "model": "checkpoints/Qwen3-0.6B-Base",
+    "max_bytes": 4000000,
+    "chunk_size": 2048,
+    "batch_chunks": 8,
+    "lora_r": 32,
+    "epochs_per_train": 3,
+    "train_interval": 1,
+    "target_modules": "q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj",
+    "base_seed": 42,
+    "lora_dropout": 0.0,
+    "grad_clip": 1.0,
+    "weight_decay": 0.01,
+    "train_on_all": false,
+    "no_decompress": true,
+    "measure_gk": true
+  },
+  "grid": {
+    "lr": [1e-04, 2e-04],
+    "data": [
+      "data/text/raw/enwik9",
+      "data/text/raw/pile_of_law_eurlex",
+      "data/text/raw/mix_enwik9_beancounter_pile_4MB"
+    ]
+  }
+}
